@@ -30,7 +30,7 @@ class Logger(object):
     def __init__(self, logger_name='None'):
         self.logger = logging.getLogger(logger_name)
         logging.root.setLevel(logging.NOTSET)
-        self.log_file_name = 'uniqsar_{0}.log'.format(datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S"))
+        self.log_file_name = 'UniPK_{0}.log'.format(datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S"))
 
         cwd_path = os.path.abspath(os.getcwd())
         self.log_path = os.path.join(cwd_path, "logs")
@@ -61,7 +61,7 @@ class Logger(object):
             self.logger.addHandler(file_handler)
 
             # Set custom exception handler
-            sys.excepthook = self.handle_exception
+            # sys.excepthook = self.handle_exception
 
         self.logger.log_file_path = os.path.join(self.log_path, self.log_file_name)
         return self.logger
@@ -72,5 +72,5 @@ class Logger(object):
             return
         self.logger.error("Uncaught exception: %s", exc_value)
 
-logger = Logger('Uni-QSAR').get_logger()
+logger = Logger('Uni-PK').get_logger()
 logger.setLevel(logging.INFO)

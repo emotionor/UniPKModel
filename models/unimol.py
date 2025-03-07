@@ -21,10 +21,11 @@ BACKBONE = {
 }
 
 class UniMolModel(BaseUnicoreModel):
-    def __init__(self, output_dim=2, pretrain='mol_pre_no_h_220816.pt', **kwargs):
+    def __init__(self, output_dim=2, pretrain='mol_pre_no_h_220816.pt', return_rep=False):
         super().__init__()
         self.args = base_architecture()
         self.output_dim = output_dim
+        self.return_rep = return_rep
         self.pretrain_path = os.path.join(PRE_TRAIN_WEIGHT_PATH, pretrain)
         self.dictionary =  Dictionary.load(DICT_PATH)
         self.mask_idx = self.dictionary.add_symbol("[MASK]", is_special=True)
@@ -105,9 +106,10 @@ class UniMolModel(BaseUnicoreModel):
             _,
             _,
         ) = self.encoder(x, padding_mask=padding_mask, attn_mask=graph_attn_bias)
+        if self.return_rep:
+            return encoder_rep[:, 0, :]
         self.encoder_rep = encoder_rep
         logits = self.classification_head(encoder_rep)
-
         return logits
 
     def batch_collate_fn(self, samples):
@@ -122,7 +124,7 @@ class UniMolModel(BaseUnicoreModel):
             elif k == 'src_tokens':
                 v = pad_1d_tokens([torch.tensor(s[0][k]).long() for s in samples], pad_idx=self.padding_idx)
             batch[k] = v
-        label = torch.tensor([s[1] for s in samples])
+        label = torch.tensor([s[1] for s in samples]).float()
         return batch, label
 
 def base_architecture():

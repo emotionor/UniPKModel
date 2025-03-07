@@ -6,11 +6,10 @@ conc_cols_prefix: 'CT_CON'
 save_path: './save_dir'
 k: 5
 num_epochs: 100
-batch_size: 16
+batch_size: 32
 learning_rate: 1e-4
 eps: 1e-6
 warmup_ratio: 0.03
-output_dim: 10
 pretrain: 'mol_pre_all_h_220816.pt'
 num_cmpts: 3
 route: 'i.v.'
