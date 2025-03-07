@@ -1,0 +1,132 @@
+import os
+import json
+import time
+import pickle
+
+import numpy as np
+import pandas as pd
+import torch
+import torch.nn as nn
+from torch.utils.data import DataLoader as TorchDataLoader
+from torch.nn.utils import clip_grad_norm_
+from sklearn.model_selection import KFold
+
+from models.unimol import UniMolModel
+from data import load_or_create_dataset
+from utils import get_linear_schedule_with_warmup, read_yaml, save_yaml, logger
+from models import UniMolModel, UniPKModel, train_epoch, validate_epoch, decorate_torch_batch, get_model_params, process_net_targets
+
+def setup_device():
+    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+def setup_directories(config):
+    os.makedirs(config['save_path'], exist_ok=True)
+    os.makedirs(os.path.join(config['save_path'], 'latest'), exist_ok=True)
+    save_yaml(config, os.path.join(config['save_path'], 'config.yaml'))
+
+def setup_optimizer_scheduler(model, pk_model, config, train_loader):
+    num_training_steps = len(train_loader) * config['num_epochs']
+    num_warmup_steps = int(num_training_steps * config['warmup_ratio'])
+    opt_params = list(model.parameters()) + list(pk_model.parameters())
+    optimizer = torch.optim.Adam(opt_params, lr=config['learning_rate'], eps=config['eps'])
+    scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=num_warmup_steps, num_training_steps=num_training_steps)
+    return optimizer, scheduler
+
+def save_model_state(model, pk_model, path):
+    model_state_dict = {
+        'model_state_dict': model.state_dict(),
+        'pk_model_state_dict': pk_model.state_dict(),
+    }
+    torch.save(model_state_dict, path)
+
+def k_fold_cross_validation(dataset, config):
+    setup_directories(config)
+    device = setup_device()
+    kf = KFold(n_splits=config['k'], shuffle=True, random_state=42)
+    
+    fold_results = []
+    for fold, (train_idx, val_idx) in enumerate(kf.split(dataset)):
+        logger.info(f'Fold {fold + 1}/{config["k"]}')
+        torch.manual_seed(42)
+        train_sampler = torch.utils.data.SubsetRandomSampler(train_idx)
+        val_sampler = torch.utils.data.SubsetRandomSampler(val_idx)
+        output_dim, return_rep = get_model_params(config['method'], config['route'], config['num_cmpts'])
+        model = UniMolModel(output_dim=output_dim, pretrain=config['pretrain'], return_rep=return_rep).to(device)
+        pk_model = UniPKModel(num_cmpts=config['num_cmpts'], route=config['route'], method=config['method']).to(device)
+
+        train_loader = TorchDataLoader(dataset, batch_size=config['batch_size'], sampler=train_sampler, collate_fn=model.batch_collate_fn)
+        val_loader = TorchDataLoader(dataset, batch_size=config['batch_size'], sampler=val_sampler, collate_fn=model.batch_collate_fn)
+
+        optimizer, scheduler = setup_optimizer_scheduler(model, pk_model, config, train_loader)
+        scaler = torch.cuda.amp.GradScaler() if device.type == 'cuda' else None
+        
+        best_val_loss = float('inf')
+        for epoch in range(config['num_epochs']):
+            train_loss, duration, lr = train_epoch(model, train_loader, pk_model, scheduler, optimizer, device, scaler)
+            val_loss = validate_epoch(model, val_loader, pk_model, device)
+            logger.info(f'Epoch {epoch + 1}/{config["num_epochs"]}: Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}, Duration: {duration:.2f}s, LR: {lr:.6f}')
+            if val_loss < best_val_loss:
+                best_val_loss = val_loss
+                save_model_state(model, pk_model, os.path.join(config['save_path'], f'best_model_fold_{fold + 1}.pth'))
+            save_model_state(model, pk_model, os.path.join(config['save_path'], f'latest/latest_model_fold_{fold + 1}.pth'))
+        
+        fold_results.append(best_val_loss)
+        logger.info(f'Best Validation Loss for fold {fold + 1}: {best_val_loss}')
+    
+    logger.info(f'Average Best Validation Loss: {np.mean(fold_results)}')
+
+def test_model(model_path, filepath=None):
+    config = read_yaml(os.path.join(model_path, 'config.yaml'))
+    if filepath is not None:
+        config['test_filepath'] = filepath
+    elif 'test_filepath' not in config:
+        raise ValueError('Test file path is not provided')
+    save_yaml(config, os.path.join(model_path, 'config.yaml'))
+
+    device = setup_device()
+    output_dim, return_rep = get_model_params(config['method'], config['route'], config['num_cmpts'])
+    model = UniMolModel(output_dim=output_dim, pretrain=config['pretrain'], return_rep=return_rep).to(device)
+    pk_model = UniPKModel(num_cmpts=config['num_cmpts'], route=config['route'], method=config['method']).to(device)
+
+    dataset, smiles_list, targets = load_or_create_dataset(config, split='test')
+    #samples = generate_conformers(smiles_list, targets)
+    dataloader = TorchDataLoader(dataset, batch_size=config['batch_size'], shuffle=False, collate_fn=model.batch_collate_fn)
+
+    y_pred = []
+    for fold in range(1, config['k']+1):
+        model_state_dict = torch.load(os.path.join(model_path, f'best_model_fold_{fold}.pth'))
+        model.load_state_dict(model_state_dict['model_state_dict'])
+        pk_model.load_state_dict(model_state_dict['pk_model_state_dict'])
+        model.eval()
+        pk_model.eval()
+
+        y_pred_fold = []
+        with torch.no_grad():
+            for net_inputs, net_targets in dataloader:
+                net_inputs, net_targets = decorate_torch_batch(net_inputs, net_targets, device)
+                route, doses, meas_times, meas_conc_iv = process_net_targets(net_targets)
+                outputs = model(**net_inputs)
+                solution = pk_model(outputs, route, doses, meas_times)
+                y_pred_fold.append(solution[:,0].transpose(0, 1))
+        y_pred_fold = torch.cat(y_pred_fold, dim=0)
+        y_pred.append(y_pred_fold)
+    
+    y_pred = torch.stack(y_pred, dim=0)
+    y_pred = torch.mean(y_pred, dim=0)
+
+    df_smiles = pd.DataFrame(smiles_list, columns=['smiles'])
+    df_targets = pd.DataFrame(targets, columns=['route', 'dose']+[f'time_{i}' for i in range(len(y_pred[0]))]+[f'conc_{i}' for i in range(len(y_pred[0]))])
+    df_pred = pd.DataFrame(y_pred.cpu().numpy(), columns=[f'pred_conc_{i}' for i in range(len(y_pred[0]))])
+    df = pd.concat([df_smiles, df_targets, df_pred], axis=1)
+    save_name = os.path.join(model_path, os.path.splitext(os.path.basename(config['test_filepath']))[0] + '_pred.csv')
+    df.to_csv(save_name, index=False)
+    return df
+
+def train(config):
+    dataset = load_or_create_dataset(config, split='train')
+    k_fold_cross_validation(dataset, config)
+
+if __name__ == '__main__':
+    config = read_yaml('config/config.yaml')
+    # train(config)
+    test_model('save_dir','/vepfs/fs_users/cuiyaning/uni-qsar/0821/optuna-dml/test_pk/data/CT1127_clean_iv_test.csv')
