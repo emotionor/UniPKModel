@@ -18,6 +18,7 @@ def read_yaml(file_path, encoding='utf-8'):
     config.learning_rate = float(config.learning_rate)
     config.warmup_ratio = float(config.warmup_ratio)
     config.eps = float(config.eps)
+    config.num_cmpts = int(config.num_cmpts)
     return config
 
 def save_yaml(data, out_file_path, encoding='utf-8'):

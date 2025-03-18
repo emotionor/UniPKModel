@@ -33,6 +33,9 @@ class UniPKModel(nn.Module):
         elif self.method == 'NeuralODE':
             self.cmptmodel = NeuralODE(self.num_cmpts, route=self.route, input_dim=512)
             self.volumeD = VolumeD(input_dim=512)
+        elif self.method == 'NeuralODE2':
+            self.cmptmodel = NeuralODE2(self.num_cmpts, route=self.route, input_dim=512)
+            self.volumeD = VolumeD(input_dim=512)
         else:
             raise ValueError(f"method {self.method} not supported")
            
@@ -40,7 +43,7 @@ class UniPKModel(nn.Module):
         if len(params.shape)==1:
             params = params.unsqueeze(0)  # for single sample
         
-        if self.method == 'NeuralODE':
+        if self.method in ['NeuralODE', 'NeuralODE2']:
             V0 = self.volumeD(params)
             C1 = doses / V0
         else:
@@ -58,7 +61,7 @@ class UniPKModel(nn.Module):
             C[-1][route == 0] = C1[route == 0]
 
         init_conditions = C
-        if self.method == 'NeuralODE':
+        if self.method in ['NeuralODE', 'NeuralODE2']:
             solution  = odeint(lambda t, y: self.cmptmodel(t, y, params, V0), init_conditions, meas_times, options={"min_step": 0.01},rtol=1e-3,atol=1e-4)
         else:
             solution  = odeint(lambda t, y: self.cmptmodel(t, y, params), init_conditions, meas_times, options={"min_step": 0.01},rtol=1e-3,atol=1e-4)
@@ -75,13 +78,13 @@ def get_model_params(method, route, num_cmpts):
         num_classes = 2 * num_cmpts + 3
     elif method in ['mixmodel2', 'mixmodel3']:
         num_classes = 2 * num_cmpts + 4
-    elif method in ['NeuralODE']:
+    elif method in ['NeuralODE', 'NeuralODE2']:
         num_classes = 2 * num_cmpts
     else:
         raise ValueError(f"method {method} not supported")
     if route == 'p.o.':
         num_classes += 1
-    return num_classes, method in ['NeuralODE']
+    return num_classes, method in ['NeuralODE', 'NeuralODE2']
 
 class BaseCompartmentModel(nn.Module):
     def __init__(self, num_compartments, route='i.v.'):
@@ -135,13 +138,44 @@ class NeuralODE(BaseCompartmentModel):
 
         net_output = self.net(torch.cat([params, y[0].unsqueeze(1)], dim=-1))
         Cl = net_output[:, 0]
-        rate_constants = net_output[:, 1:].view(-1, 2, self.num_compartments - 1)
 
         C = y[:self.num_compartments]
         dC_dt = torch.zeros_like(C)
         dC_dt[0] = - Cl / V0 * C[0]
 
         if self.num_compartments > 1:
+            rate_constants = net_output[:, 1:].view(-1, 2, self.num_compartments - 1)
+            for i in range(1, self.num_compartments):
+                dC_dt[0] +=  - rate_constants[:, 0, i-1] * C[0] + rate_constants[:, 1, i-1] * C[i]
+                dC_dt[i] = rate_constants[:, 0, i-1] * C[0] - rate_constants[:, 1, i-1] * C[i]
+
+        return dC_dt
+    
+class NeuralODE2(BaseCompartmentModel):
+    def __init__(self, num_compartments, route='i.v.', input_dim=512):
+        super(NeuralODE2, self).__init__(num_compartments=num_compartments, route=route)
+        self.input_dim = input_dim
+        output_dim = num_compartments * 2 - 1
+        self.net = nn.Sequential(
+            nn.Linear(input_dim + 1, 64),
+            nn.ReLU(),
+            nn.Linear(64, output_dim),
+            nn.Softplus(),
+        )
+
+    def forward_iv(self, t, y, params, V0):
+        if len(params.shape) == 1:
+            params = params.unsqueeze(0)
+
+        net_output = self.net(torch.cat([params, y[0].unsqueeze(1)], dim=-1))
+        Cl = net_output[:, 0]
+        
+        C = y[:self.num_compartments]
+        dC_dt = torch.zeros_like(C)
+        dC_dt[0] = - Cl / V0
+
+        if self.num_compartments > 1:
+            rate_constants = net_output[:, 1:].view(-1, 2, self.num_compartments - 1)
             for i in range(1, self.num_compartments):
                 dC_dt[0] +=  - rate_constants[:, 0, i-1] * C[0] + rate_constants[:, 1, i-1] * C[i]
                 dC_dt[i] = rate_constants[:, 0, i-1] * C[0] - rate_constants[:, 1, i-1] * C[i]
