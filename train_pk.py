@@ -12,10 +12,9 @@ from torch.nn.utils import clip_grad_norm_
 from sklearn.model_selection import KFold
 
 from models.unimol import UniMolModel
-from data import load_or_create_dataset
+from data import load_or_create_dataset, SMILESDataset
 from utils import get_linear_schedule_with_warmup, read_yaml, save_yaml, logger
-from models import UniMolModel, UniPKModel, train_epoch, validate_epoch, decorate_torch_batch, get_model_params, process_net_targets
-
+from models import UniMolModel, UniPKModel, train_epoch, validate_epoch, decorate_torch_batch, get_model_params, process_net_targets, cal_all_losses
 def setup_device():
     return torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -62,8 +61,8 @@ def k_fold_cross_validation(dataset, config):
         
         best_val_loss = float('inf')
         for epoch in range(config['num_epochs']):
-            train_loss, duration, lr = train_epoch(model, train_loader, pk_model, scheduler, optimizer, device, scaler)
-            val_loss = validate_epoch(model, val_loader, pk_model, device)
+            train_loss, duration, lr = train_epoch(model, train_loader, pk_model, scheduler, optimizer, device, scaler, config['loss_fn'])
+            val_loss = validate_epoch(model, val_loader, pk_model, device, config['loss_fn'])
             logger.info(f'Epoch {epoch + 1}/{config["num_epochs"]}: Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}, Duration: {duration:.2f}s, LR: {lr:.6f}')
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
@@ -94,6 +93,7 @@ def test_model(model_path, filepath=None):
 
     y_pred = []
     for fold in range(1, config['k']+1):
+        logger.info(f'Loading model for fold {fold}')
         model_state_dict = torch.load(os.path.join(model_path, f'best_model_fold_{fold}.pth'))
         model.load_state_dict(model_state_dict['model_state_dict'])
         pk_model.load_state_dict(model_state_dict['pk_model_state_dict'])
@@ -104,15 +104,22 @@ def test_model(model_path, filepath=None):
         with torch.no_grad():
             for net_inputs, net_targets in dataloader:
                 net_inputs, net_targets = decorate_torch_batch(net_inputs, net_targets, device)
-                route, doses, meas_times, meas_conc_iv = process_net_targets(net_targets)
+                route, doses, meas_times, meas_conc_iv, n = process_net_targets(net_targets)
                 outputs = model(**net_inputs)
                 solution = pk_model(outputs, route, doses, meas_times)
                 y_pred_fold.append(solution[:,0].transpose(0, 1))
         y_pred_fold = torch.cat(y_pred_fold, dim=0)
+        metrics = cal_all_losses(y_pred_fold, torch.tensor(targets, device=device, dtype=y_pred_fold.dtype)[:,n+1:])
+        logger.info(f'Fold {fold} Test Metrics: {json.dumps(metrics, indent=4)}')
         y_pred.append(y_pred_fold)
     
     y_pred = torch.stack(y_pred, dim=0)
     y_pred = torch.mean(y_pred, dim=0)
+    metrics_dict = cal_all_losses(y_pred, torch.tensor(targets, device=device, dtype=y_pred_fold.dtype)[:,n+1:])
+    logger.info(f'Test Metrics: {json.dumps(metrics_dict, indent=4)}')
+    
+    with open(os.path.join(model_path, 'test_metrics.json'), 'w') as f:
+        json.dump(metrics_dict, f, indent=4)
 
     df_smiles = pd.DataFrame(smiles_list, columns=['smiles'])
     df_targets = pd.DataFrame(targets, columns=['route', 'dose']+[f'time_{i}' for i in range(len(y_pred[0]))]+[f'conc_{i}' for i in range(len(y_pred[0]))])
@@ -128,5 +135,5 @@ def train(config):
 
 if __name__ == '__main__':
     config = read_yaml('config/config.yaml')
-    # train(config)
-    test_model('save_dir','/vepfs/fs_users/cuiyaning/uni-qsar/0821/optuna-dml/test_pk/data/CT1127_clean_iv_test.csv')
+    train(config)
+    test_model(config['save_path'],'/vepfs/fs_users/cuiyaning/uni-qsar/0821/optuna-dml/test_pk/data/CT1127_clean_iv_test.csv')
