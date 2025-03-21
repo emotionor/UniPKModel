@@ -128,7 +128,8 @@ def main(
     dose_route=1,
     batch_size=4,
     model_path='output/pk_NeuralODE_3_log_mae',
-    save_json=True
+    save_json=True,
+    save_path='./'
     ):
     # Load model config
     if os.path.exists(os.path.join(model_path, 'config.yaml')):
@@ -165,9 +166,11 @@ def main(
     pk_params = get_pk_parameters(Vd, dose, meas_times, concs)
 
     if save_json:
-        with open(os.path.join(model_path, 'ct_curve.json'), 'w') as f:
+        if not os.path.exists(save_path):
+            os.makedirs(save_path)
+        with open(os.path.join(save_path, 'ct_curve.json'), 'w') as f:
             json.dump({'times': times.tolist(), 'concs': concs.tolist()}, f)
-        with open(os.path.join(model_path, 'pk_params.json'), 'w') as f:
+        with open(os.path.join(save_path, 'pk_params.json'), 'w') as f:
             json.dump(pk_params, f)
     return pk_params
 
@@ -179,5 +182,13 @@ if __name__ == "__main__":
     from rdkit.Chem import PandasTools
 
     mol_list = PandasTools.LoadSDF('test.sdf')['ROMol']
-    main(smiles_list=None, mol_list=mol_list, dose=1, dose_route=1, batch_size=4, model_path='output_po/pk_NeuralODE_3_log_mae_time_exp_decay', save_json=True)
+    main(smiles_list=None,
+        mol_list=mol_list, 
+        dose=1,
+        dose_route=1, 
+        batch_size=4, 
+        model_path='/vepfs/fs_qsar/pk_model/pk_NeuralODE_3_log_mae_time_exp_decay',
+        save_json=True,
+        save_path='./',
+        )
 
