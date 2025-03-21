@@ -39,19 +39,26 @@ def save_model_state(model, pk_model, path):
     torch.save(model_state_dict, path)
 
 def k_fold_cross_validation(dataset, config):
+    output_dim, return_rep = get_model_params(config['method'], config['route'], config['num_cmpts'])
+    config['output_dim'] = output_dim
+    config['return_rep'] = return_rep
     setup_directories(config)
     device = setup_device()
     kf = KFold(n_splits=config['k'], shuffle=True, random_state=42)
-    
     fold_results = []
     for fold, (train_idx, val_idx) in enumerate(kf.split(dataset)):
         logger.info(f'Fold {fold + 1}/{config["k"]}')
         torch.manual_seed(42)
         train_sampler = torch.utils.data.SubsetRandomSampler(train_idx)
         val_sampler = torch.utils.data.SubsetRandomSampler(val_idx)
-        output_dim, return_rep = get_model_params(config['method'], config['route'], config['num_cmpts'])
         model = UniMolModel(output_dim=output_dim, pretrain=config['pretrain'], return_rep=return_rep).to(device)
-        pk_model = UniPKModel(num_cmpts=config['num_cmpts'], route=config['route'], method=config['method']).to(device)
+        pk_model = UniPKModel(
+            num_cmpts=config['num_cmpts'], 
+            route=config['route'], 
+            method=config['method'],
+            node_mid_dim=config.get('node_mid_dim', 64),
+            vd_mid_dim = config.get('vd_mid_dim', 32),
+        ).to(device)
 
         train_loader = TorchDataLoader(dataset, batch_size=config['batch_size'], sampler=train_sampler, collate_fn=model.batch_collate_fn)
         val_loader = TorchDataLoader(dataset, batch_size=config['batch_size'], sampler=val_sampler, collate_fn=model.batch_collate_fn)
@@ -60,14 +67,27 @@ def k_fold_cross_validation(dataset, config):
         scaler = torch.cuda.amp.GradScaler() if device.type == 'cuda' else None
         
         best_val_loss = float('inf')
+        early_stop_counter = 0
+        early_stop_patience = config.get('early_stop_patience', 10)
         for epoch in range(config['num_epochs']):
-            train_loss, duration, lr = train_epoch(model, train_loader, pk_model, scheduler, optimizer, device, scaler, config['loss_fn'])
-            val_loss = validate_epoch(model, val_loader, pk_model, device, config['loss_fn'])
+            try:
+                train_loss, duration, lr = train_epoch(model, train_loader, pk_model, scheduler, optimizer, device, scaler, config['loss_fn'])
+                val_loss = validate_epoch(model, val_loader, pk_model, device, config['loss_fn'])
+            except Exception as e:
+                logger.error(f'Error in Epoch {epoch + 1}: {e}')
+                break
             logger.info(f'Epoch {epoch + 1}/{config["num_epochs"]}: Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}, Duration: {duration:.2f}s, LR: {lr:.6f}')
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
                 save_model_state(model, pk_model, os.path.join(config['save_path'], f'best_model_fold_{fold + 1}.pth'))
+                early_stop_counter = 0
+            else:
+                early_stop_counter += 1
             save_model_state(model, pk_model, os.path.join(config['save_path'], f'latest/latest_model_fold_{fold + 1}.pth'))
+
+            if early_stop_counter >= early_stop_patience:
+                logger.info(f'Early Stopping at Epoch {epoch + 1}')
+                break
         
         fold_results.append(best_val_loss)
         logger.info(f'Best Validation Loss for fold {fold + 1}: {best_val_loss}')
@@ -85,7 +105,13 @@ def test_model(model_path, filepath=None):
     device = setup_device()
     output_dim, return_rep = get_model_params(config['method'], config['route'], config['num_cmpts'])
     model = UniMolModel(output_dim=output_dim, pretrain=config['pretrain'], return_rep=return_rep).to(device)
-    pk_model = UniPKModel(num_cmpts=config['num_cmpts'], route=config['route'], method=config['method']).to(device)
+    pk_model = UniPKModel(
+        num_cmpts=config['num_cmpts'], 
+        route=config['route'], 
+        method=config['method'],
+        node_mid_dim=config.get('node_mid_dim', 64),
+        vd_mid_dim = config.get('vd_mid_dim', 32),
+    ).to(device)
 
     dataset, smiles_list, targets = load_or_create_dataset(config, split='test')
     #samples = generate_conformers(smiles_list, targets)
@@ -115,7 +141,7 @@ def test_model(model_path, filepath=None):
     
     y_pred = torch.stack(y_pred, dim=0)
     y_pred = torch.mean(y_pred, dim=0)
-    metrics_dict = cal_all_losses(y_pred, torch.tensor(targets, device=device, dtype=y_pred_fold.dtype)[:,n+1:])
+    metrics_dict = cal_all_losses(y_pred, torch.tensor(targets, device=device, dtype=y_pred_fold.dtype)[:,n+1:], save_path=model_path)
     logger.info(f'Test Metrics: {json.dumps(metrics_dict, indent=4)}')
     
     with open(os.path.join(model_path, 'test_metrics.json'), 'w') as f:

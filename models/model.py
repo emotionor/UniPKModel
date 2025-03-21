@@ -3,6 +3,7 @@ import torch.nn as nn
 import time
 from torch.nn.utils import clip_grad_norm_
 from models.loss import get_loss_fn
+from utils import logger
 
 def train_epoch(model, dataloader, pk_model, scheduler, optimizer, device, scaler=None, loss_fn=None):
     model.train()
@@ -21,12 +22,12 @@ def train_epoch(model, dataloader, pk_model, scheduler, optimizer, device, scale
         if scaler is not None:
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
-            clip_grad_norm_(model.parameters(), 5.0)
+            clip_grad_norm_(model.parameters(), 1.0)
             scaler.step(optimizer)
             scaler.update()
         else:
             loss.backward()
-            clip_grad_norm_(model.parameters(), 5.0)
+            clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
         scheduler.step()
     end_time = time.time()
@@ -47,7 +48,8 @@ def validate_epoch(model, dataloader, pk_model, device, loss_fn=None):
 def pkct_loss(input, targets, model, pk_model, loss_fn=None):
     route, doses, meas_times, meas_conc_iv, _ = process_net_targets(targets)
     outputs = model(**input)
-    solution = pk_model(outputs, route, doses, meas_times)
+    pk_model = pk_model.double()
+    solution = pk_model(outputs.double(), route.double(), doses.double(), meas_times.double())  # 确保 pk_model 的输入为双精度
     y_pred = solution[:,0].transpose(0, 1)
     y_pred = y_pred.clamp(min=0)
     loss_func = get_loss_fn(loss_fn)

@@ -12,7 +12,6 @@ class UniPKModel(nn.Module):
         self.compartment_penalty_wight = compartment_penalty_wight
         self.weighting = weighting
         self.route = route
-        self.device = kwargs.get('device', 'cpu')
         self.method = method # 'linear' or 'mcmodel' or 'mmmodel' or 'induction' or 'inhibition'
         if self.method == 'mcmodel':
             self.cmptmodel = MultiCompartmentModel(self.num_cmpts, route=self.route)
@@ -31,8 +30,10 @@ class UniPKModel(nn.Module):
         elif self.method == 'mixmodel3':
             self.cmptmodel = MixPKModel3(self.num_cmpts, route=self.route)
         elif self.method == 'NeuralODE':
-            self.cmptmodel = NeuralODE(self.num_cmpts, route=self.route, input_dim=512)
-            self.volumeD = VolumeD(input_dim=512)
+            node_mid_dim = kwargs.get('node_mid_dim', 64)
+            vd_mid_dim = kwargs.get('vd_mid_dim', 32)
+            self.cmptmodel = NeuralODE(self.num_cmpts, route=self.route, input_dim=512, middle_dim=node_mid_dim)
+            self.volumeD = VolumeD(input_dim=512, middle_dim=vd_mid_dim)
         elif self.method == 'NeuralODE2':
             self.cmptmodel = NeuralODE2(self.num_cmpts, route=self.route, input_dim=512)
             self.volumeD = VolumeD(input_dim=512)
@@ -45,9 +46,9 @@ class UniPKModel(nn.Module):
         
         if self.method in ['NeuralODE', 'NeuralODE2']:
             V0 = self.volumeD(params)
-            C1 = doses / V0
         else:
-            C1 = doses / params[:,1]  # Dose / Vc as initial condition
+            V0 = params[:,1]
+        C1 = doses / V0  # Dose / Vc as initial condition
         
         batch_size = C1.shape[0]
 
@@ -107,12 +108,12 @@ class BaseCompartmentModel(nn.Module):
         raise NotImplementedError
 
 class VolumeD(nn.Module):
-    def __init__(self, input_dim):
+    def __init__(self, input_dim, middle_dim=32):
         super(VolumeD, self).__init__()
         self.net = nn.Sequential(
-            nn.Linear(input_dim, 32),
+            nn.Linear(input_dim, middle_dim),
             nn.ReLU(),
-            nn.Linear(32, 1),
+            nn.Linear(middle_dim, 1),
             nn.Softplus(),
         )
     
@@ -121,16 +122,23 @@ class VolumeD(nn.Module):
 
 
 class NeuralODE(BaseCompartmentModel):
-    def __init__(self, num_compartments, route='i.v.', input_dim=512):
+    def __init__(self, num_compartments, route='i.v.', input_dim=512, middle_dim=64):
         super(NeuralODE, self).__init__(num_compartments=num_compartments, route=route)
         self.input_dim = input_dim
         output_dim = num_compartments * 2 - 1
         self.net = nn.Sequential(
-            nn.Linear(input_dim + 1, 64),
+            nn.Linear(input_dim + 1, middle_dim),
             nn.ReLU(),
-            nn.Linear(64, output_dim),
+            nn.Linear(middle_dim, output_dim),
             nn.Softplus(),
         )
+        if route == 'p.o.':
+            self.poka = nn.Sequential(
+                nn.Linear(input_dim + 1, middle_dim),
+                nn.ReLU(),
+                nn.Linear(middle_dim, 1),
+                nn.Softplus(),
+            )
 
     def forward_iv(self, t, y, params, V0):
         if len(params.shape) == 1:
@@ -150,6 +158,29 @@ class NeuralODE(BaseCompartmentModel):
                 dC_dt[i] = rate_constants[:, 0, i-1] * C[0] - rate_constants[:, 1, i-1] * C[i]
 
         return dC_dt
+    
+    def forward_po(self, t, y, params, V0):
+        if len(params.shape) == 1:
+            params = params.unsqueeze(0)
+
+        net_output = self.net(torch.cat([params, y[0].unsqueeze(1)], dim=-1))
+        Cl = net_output[:, 0]
+
+        ka = self.poka(torch.cat([params, y[0].unsqueeze(1)], dim=-1)).squeeze(1)
+
+        C = y[:self.num_compartments + 1]
+        dC_dt = torch.zeros_like(C)
+        dC_dt[0] = - Cl / V0 * C[0] + ka * C[-1]
+        dC_dt[-1] = - ka * C[-1]
+
+        if self.num_compartments > 1:
+            rate_constants = net_output[:, 1:].view(-1, 2, self.num_compartments - 1)
+            for i in range(1, self.num_compartments):
+                dC_dt[0] +=  - rate_constants[:, 0, i-1] * C[0] + rate_constants[:, 1, i-1] * C[i]
+                dC_dt[i] = rate_constants[:, 0, i-1] * C[0] - rate_constants[:, 1, i-1] * C[i]
+
+        return dC_dt
+
     
 class NeuralODE2(BaseCompartmentModel):
     def __init__(self, num_compartments, route='i.v.', input_dim=512):

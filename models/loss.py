@@ -2,28 +2,21 @@ import torch
 
 
 def get_loss_fn(loss_fn):
-    if loss_fn == 'log_mae':
-        return log_mae_loss
-    elif loss_fn == 'log_mse':
-        return log_mse_loss
-    elif loss_fn == 'log_cosh':
-        return log_cosh_loss
-    elif loss_fn == 'log_mae_quantile':
-        return log_mae_quantile_loss
-    elif loss_fn == 'log_mae_time_exp_decay':
-        return log_mae_time_exp_decay_loss
-    elif loss_fn == 'log_mse_time_exp_decay':
-        return log_mse_time_exp_decay_loss
-    elif loss_fn == 'log_mae_time_linear_decay':
-        return log_mae_time_linear_decay_loss
-    elif loss_fn == 'log_mse_time_linear_decay':
-        return log_mse_time_linear_decay_loss
-    elif loss_fn == 'log_mae_time_cos_decay':
-        return log_mae_time_cos_decay_loss
-    elif loss_fn == 'log_mse_time_cos_decay':
-        return log_mse_time_cos_decay_loss
-    else:
-        return log_mae_loss
+    loss_fns = {
+        'log_mae': log_mae_loss,
+        'log_mse': log_mse_loss,
+        'log_mae_time_exp_decay': log_mae_time_exp_decay_loss,
+        'log_mse_time_exp_decay': log_mse_time_exp_decay_loss,
+        'log_mae_time_linear_decay': log_mae_time_linear_decay_loss,
+        'log_mse_time_linear_decay': log_mse_time_linear_decay_loss,
+        'log_mae_time_cos_decay': log_mae_time_cos_decay_loss,
+        'log_mse_time_cos_decay': log_mse_time_cos_decay_loss,
+        'log_nmae': log_nmae_loss,
+        'log_nmae_time_linear_decay': log_nmae_time_linear_decay_loss,
+        'log_nmae_time_exp_decay': log_nmae_time_exp_decay_loss,
+        'log_nmae_time_cos_decay': log_nmae_time_cos_decay_loss,
+    }
+    return loss_fns.get(loss_fn, log_mae_loss)
 
 def cal_all_losses(y_preds, y_true, **kwargs):
     mask = torch.isfinite(y_true) & torch.isfinite(y_preds)
@@ -62,6 +55,18 @@ def cal_all_losses(y_preds, y_true, **kwargs):
     top60_r2 = torch.topk(r2_scores, int(0.6 * r2_scores.shape[0]), largest=True).values
     r2_score = torch.mean(r2_scores)
     # mfce = torch.mean(mfce[torch.isfinite(mfce)])
+    if kwargs.get('save_path', False):
+        save_path = kwargs['save_path']
+        #把mean_log_mae, mean_log_mse, r2_scores保存到save_path的csv
+        import pandas as pd
+        import os
+        df = pd.DataFrame({
+            'mean_log_mae': mean_log_mae.cpu().numpy(),
+            'mean_log_mse': mean_log_mse.cpu().numpy(),
+            'r2_scores': r2_scores.cpu().numpy(),
+        })
+        df.to_csv(os.path.join(save_path, 'losses.csv'), index=False)
+
     return {
         'log_mae': loss_log_mae.item(),
         'log_mse': loss_log_mse.item(),
@@ -127,6 +132,21 @@ def log_mae_loss(y_preds, y_true, **kwargs):
     loss = torch.mean(mean_log_mae[torch.isfinite(mean_log_mae)])
     return loss
 
+def log_nmae_loss(y_preds, y_true, **kwargs):
+    mask = torch.isfinite(y_true) & torch.isfinite(y_preds)
+    y_max_min = torch.max(torch.where(torch.isnan(y_true), 0, y_true), dim=1).values
+    y_preds = y_preds[mask]+1e-5
+    y_true = y_true[mask]+1e-5
+
+    unique_indices = torch.arange(mask.shape[0], device=mask.device)
+    unique_values = unique_indices.repeat_interleave(mask.sum(dim=1))
+
+    log_mae = torch.absolute(torch.log(y_preds) - torch.log(y_true))
+    mean_log_mae = torch.stack([torch.mean(log_mae[unique_values == i]) for i in unique_indices])
+    mean_log_nmae = mean_log_mae / torch.log(y_max_min)
+    loss = torch.mean(mean_log_nmae[torch.isfinite(mean_log_nmae)])
+    return loss
+
 def log_mse_loss(y_preds, y_true, **kwargs):
     mask = torch.isfinite(y_true) & torch.isfinite(y_preds)
     y_preds = y_preds[mask]+1e-5
@@ -138,32 +158,6 @@ def log_mse_loss(y_preds, y_true, **kwargs):
     log_mse = (torch.log(y_preds) - torch.log(y_true))**2
     mean_log_mse = torch.stack([torch.mean(log_mse[unique_values == i]) for i in unique_indices])
     loss = torch.mean(mean_log_mse[torch.isfinite(mean_log_mse)])
-    return loss
-
-def log_cosh_loss(y_preds, y_true, **kwargs):
-    mask = torch.isfinite(y_true) & torch.isfinite(y_preds)
-    y_preds = y_preds[mask]+1e-5
-    y_true = y_true[mask]+1e-5
-
-    unique_indices = torch.arange(mask.shape[0], device=mask.device)
-    unique_values = unique_indices.repeat_interleave(mask.sum(dim=1))
-
-    log_cosh = torch.log(torch.cosh(y_preds - y_true))
-    mean_log_cosh = torch.stack([torch.mean(log_cosh[unique_values == i]) for i in unique_indices])
-    loss = torch.mean(mean_log_cosh[torch.isfinite(mean_log_cosh)])
-    return loss
-
-def log_mae_quantile_loss(y_preds, y_true, alpha=0.75, **kwargs):
-    mask = torch.isfinite(y_true) & torch.isfinite(y_preds)
-    y_preds = y_preds[mask]+1e-5
-    y_true = y_true[mask]+1e-5
-
-    unique_indices = torch.arange(mask.shape[0], device=mask.device)
-    unique_values = unique_indices.repeat_interleave(mask.sum(dim=1))
-
-    log_loss = torch.max(alpha * torch.abs(torch.log(y_preds) - torch.log(y_true)), (alpha - 1) * torch.abs(torch.log(y_preds) - torch.log(y_true)))
-    mean_log_loss = torch.stack([torch.mean(log_loss[unique_values == i]) for i in unique_indices])
-    loss = torch.mean(mean_log_loss[torch.isfinite(mean_log_loss)])
     return loss
 
 def log_mae_time_exp_decay_loss(y_preds, y_true, times=None, **kwargs):
@@ -181,6 +175,25 @@ def log_mae_time_exp_decay_loss(y_preds, y_true, times=None, **kwargs):
 
     mean_log_mae = torch.stack([torch.mean(log_mae[unique_values == i]) for i in unique_indices])
     loss = torch.mean(mean_log_mae[torch.isfinite(mean_log_mae)])
+    return loss
+
+def log_nmae_time_exp_decay_loss(y_preds, y_true, times=None, **kwargs):
+    times = times.broadcast_to(y_preds.shape)
+    time_decay = torch.exp(-times)
+    mask = torch.isfinite(y_true) & torch.isfinite(y_preds)
+    y_max_min = torch.max(torch.where(torch.isnan(y_true), 0, y_true), dim=1).values
+    y_preds = y_preds[mask]+1e-5
+    y_true = y_true[mask]+1e-5
+    time_decay = time_decay[mask]
+
+    unique_indices = torch.arange(mask.shape[0], device=mask.device)
+    unique_values = unique_indices.repeat_interleave(mask.sum(dim=1))
+
+    log_mae = torch.absolute(torch.log(y_preds) - torch.log(y_true)) * time_decay
+    mean_log_mae = torch.stack([torch.mean(log_mae[unique_values == i]) for i in unique_indices])
+    mean_log_nmae = mean_log_mae / torch.log(y_max_min)
+
+    loss = torch.mean(mean_log_nmae[torch.isfinite(mean_log_nmae)])
     return loss
 
 def log_mse_time_exp_decay_loss(y_preds, y_true, times=None, **kwargs):
@@ -217,6 +230,25 @@ def log_mae_time_linear_decay_loss(y_preds, y_true, times=None, **kwargs):
     loss = torch.mean(mean_log_mae[torch.isfinite(mean_log_mae)])
     return loss
 
+def log_nmae_time_linear_decay_loss(y_preds, y_true, times=None, **kwargs):
+    times = times.broadcast_to(y_preds.shape)
+    time_decay = 1 - times / times.max()
+    mask = torch.isfinite(y_true) & torch.isfinite(y_preds)
+    y_max_min = torch.max(torch.where(torch.isnan(y_true), 0, y_true), dim=1).values
+    y_preds = y_preds[mask]+1e-5
+    y_true = y_true[mask]+1e-5
+    time_decay = time_decay[mask]
+
+    unique_indices = torch.arange(mask.shape[0], device=mask.device)
+    unique_values = unique_indices.repeat_interleave(mask.sum(dim=1))
+
+    log_mae = torch.absolute(torch.log(y_preds) - torch.log(y_true)) * time_decay
+    mean_log_mae = torch.stack([torch.mean(log_mae[unique_values == i]) for i in unique_indices])
+
+    mean_log_nmae = mean_log_mae / torch.log(y_max_min)
+    loss = torch.mean(mean_log_nmae[torch.isfinite(mean_log_nmae)])
+    return loss
+
 def log_mse_time_linear_decay_loss(y_preds, y_true, times=None, **kwargs):
     times = times.broadcast_to(y_preds.shape)
     time_decay = 1 - times / times.max()
@@ -249,6 +281,25 @@ def log_mae_time_cos_decay_loss(y_preds, y_true, times=None, **kwargs):
 
     mean_log_mae = torch.stack([torch.mean(log_mae[unique_values == i]) for i in unique_indices])
     loss = torch.mean(mean_log_mae[torch.isfinite(mean_log_mae)])
+    return loss
+
+def log_nmae_time_cos_decay_loss(y_preds, y_true, times=None, **kwargs):
+    times = times.broadcast_to(y_preds.shape)
+    time_decay = torch.cos(times / times.max() * 3.14159 / 2)
+    mask = torch.isfinite(y_true) & torch.isfinite(y_preds)
+    y_max_min = torch.max(torch.where(torch.isnan(y_true), 0, y_true), dim=1).values
+    y_preds = y_preds[mask]+1e-5
+    y_true = y_true[mask]+1e-5
+    time_decay = time_decay[mask]
+
+    unique_indices = torch.arange(mask.shape[0], device=mask.device)
+    unique_values = unique_indices.repeat_interleave(mask.sum(dim=1))
+
+    log_mae = torch.absolute(torch.log(y_preds) - torch.log(y_true)) * time_decay
+    mean_log_mae = torch.stack([torch.mean(log_mae[unique_values == i]) for i in unique_indices])
+
+    mean_log_nmae = mean_log_mae / torch.log(y_max_min)
+    loss = torch.mean(mean_log_nmae[torch.isfinite(mean_log_nmae)])
     return loss
 
 def log_mse_time_cos_decay_loss(y_preds, y_true, times=None, **kwargs):
