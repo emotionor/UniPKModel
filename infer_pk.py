@@ -22,7 +22,7 @@ def generate_dataset(smiles_list, mol_list, dose_route, dose):
     else:
         smiles_list = [None] * len(mol_list)
         conf_gen = ConformerGen(datatype='mol')
-    inputs, _, _ = conf_gen.transform(smiles_list, mol_list)
+    inputs = conf_gen.transform(smiles_list, mol_list)
     if isinstance(dose, int) or isinstance(dose, float):
         dose = [dose] * len(smiles_list)
     if isinstance(dose_route, int) or isinstance(dose_route, float):

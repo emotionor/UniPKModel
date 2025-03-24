@@ -68,7 +68,11 @@ class ConformerGen(object):
         return coords2unimol(atoms, coordinates, self.dictionary, self.max_atoms), \
                 coords2unimol(atoms_no_h, coordinates_no_h, self.dictionary, self.max_atoms), out_mol
 
-    def transform(self, smiles_list, mol_list):
+    def transform(self, smiles_list, mol_list=None):
+        if mol_list is not None:
+            assert len(smiles_list) == len(mol_list), 'Length of smiles_list and mol_list are not equal.'
+        else:
+            mol_list = [None] * len(smiles_list)
         logger.info('Start generating conformers...')
         pool = Pool(min(20, os.cpu_count(), len(smiles_list)))
         content_inputs = [item for item in pool.map(self.single_process, zip(smiles_list, mol_list))]
@@ -81,7 +85,7 @@ class ConformerGen(object):
         failed_3d_cnt = np.mean([(item['src_coord'][:,2]==0.0).all() for item in inputs])
         logger.info('Success to generate 3d conformers for {:.2f}% of molecules.'.format(100-failed_3d_cnt*100))
 
-        return inputs, no_h_inputs, out_mols
+        return inputs
 
 def inner_smi2coords(smi, seed=42, mode='fast'):
     mol = Chem.MolFromSmiles(smi)
