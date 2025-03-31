@@ -19,7 +19,7 @@ from multiprocessing import Pool
 from tqdm import tqdm
 from unicore.data import Dictionary
 
-from utils import logger, MODEL_CONFIG
+from utils import logger, DICT_PATH
 from weights import WEIGHT_DIR
 
 class ConformerGen(object):
@@ -46,12 +46,7 @@ class ConformerGen(object):
         self.max_atoms = params.get('max_atoms', 256)
         self.mode = params.get('mode', 'fast')
         self.remove_hs = params.get('remove_hs', False)
-        if self.task_type == 'molecule':
-            name = "no_h" if self.remove_hs else "all_h" 
-            name = self.task_type + '_' + name
-            self.dict_name = MODEL_CONFIG['dict'][name]
-        else:
-            self.dict_name = MODEL_CONFIG['dict'][self.data_type]
+        self.dict_name = DICT_PATH
         self.dictionary = Dictionary.load(os.path.join(WEIGHT_DIR, self.dict_name))
         self.dictionary.add_symbol("[MASK]", is_special=True)
 
