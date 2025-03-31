@@ -85,7 +85,7 @@ def k_fold_cross_validation(dataset, config):
                 early_stop_counter += 1
             save_model_state(model, pk_model, os.path.join(config['save_path'], f'latest/latest_model_fold_{fold + 1}.pth'))
 
-            if early_stop_counter >= early_stop_patience:
+            if early_stop_counter >= early_stop_patience and config.get('early_stop', False):
                 logger.info(f'Early Stopping at Epoch {epoch + 1}')
                 break
         
