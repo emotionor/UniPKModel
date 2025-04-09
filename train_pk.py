@@ -58,6 +58,7 @@ def k_fold_cross_validation(dataset, config):
             method=config['method'],
             node_mid_dim=config.get('node_mid_dim', 64),
             vd_mid_dim = config.get('vd_mid_dim', 32),
+            min_step=config.get('min_step', 1e-4),
         ).to(device)
 
         train_loader = TorchDataLoader(dataset, batch_size=config['batch_size'], sampler=train_sampler, collate_fn=model.batch_collate_fn)

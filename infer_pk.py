@@ -2,6 +2,7 @@ import os
 import json
 
 import numpy as np
+import pandas as pd
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader as TorchDataLoader
@@ -54,13 +55,17 @@ def pk_infer(model_path,
             num_cmpts=3,
             route='i.v.',
             method='NeuralODE',
-            num_folds=5
+            num_folds=5,
+            return_all=False,
             ):
     meas_times = torch.tensor(meas_times, device=device, dtype=torch.float64)
+
+    concs_total = []
+    Vd_total = []
     for fold in range(num_folds):
         model = UniMolModel(output_dim=output_dim, return_rep=return_rep).to(device)
         pk_model = UniPKModel(num_cmpts=num_cmpts, route=route, method=method).to(device)
-        model_state_dict = torch.load(os.path.join(model_path, f'best_model_fold_{fold+1}.pth'))
+        model_state_dict = torch.load(os.path.join(model_path, f'best_model_fold_{fold+1}.pth'), map_location=device)
         model.load_state_dict(model_state_dict['model_state_dict'])
         pk_model.load_state_dict(model_state_dict['pk_model_state_dict'])
         pk_model = pk_model.double()
@@ -81,9 +86,15 @@ def pk_infer(model_path,
                 else:
                     Vd_batch.append(outputs[:,1].cpu().numpy())
 
-        concs = np.concatenate(concs_batch, axis=0)
-        Vd = np.concatenate(Vd_batch, axis=0)
+        concs_total.append(np.concatenate(concs_batch, axis=0))
+        Vd_total.append(np.concatenate(Vd_batch, axis=0))
+
     meas_times = meas_times.cpu().numpy()
+    if return_all:
+        return meas_times, concs_total, Vd_total
+    concs = np.mean(np.array(concs_total), axis=0)
+    Vd = np.mean(np.array(Vd_total), axis=0)
+    
     return meas_times, concs, Vd
 
 def pk_data_loader(y_pred, dose, batch_size=4, shuffle=False):
@@ -129,7 +140,8 @@ def main(
     batch_size=4,
     model_path='output/pk_NeuralODE_3_log_mae',
     save_json=True,
-    save_path='./'
+    save_path='./',
+    return_all=False,
     ):
     # Load model config
     if os.path.exists(os.path.join(model_path, 'config.yaml')):
@@ -161,18 +173,30 @@ def main(
         num_cmpts=num_cmpts,
         route=route,
         method=method,
-        num_folds=num_folds
+        num_folds=num_folds,
+        return_all=return_all,
         )
-    pk_params = get_pk_parameters(Vd, dose, meas_times, concs)
 
-    if save_json:
-        if not os.path.exists(save_path):
-            os.makedirs(save_path)
-        with open(os.path.join(save_path, 'ct_curve.json'), 'w') as f:
-            json.dump({'times': times.tolist(), 'concs': concs.tolist()}, f)
-        with open(os.path.join(save_path, 'pk_params.json'), 'w') as f:
-            json.dump(pk_params, f)
-    return pk_params
+    if return_all:
+        pk_params_folds = []
+        for fold_idx, (concs_fold, Vd_fold) in enumerate(zip(concs, Vd), start=1):
+            pk_params_fold = get_pk_parameters(Vd_fold, dose, meas_times, concs_fold)
+            # add suffix to each key
+            pk_params_fold = {f"{key}_{fold_idx}": value for key, value in pk_params_fold.items()}
+            pk_params_folds.append(pd.DataFrame(pk_params_fold))
+
+        pk_params_df = pd.concat(pk_params_folds, axis=1)
+        pk_params_df.to_csv(os.path.join(save_path, 'pk_params_folds.csv'), index=False)
+    else:
+        pk_params = get_pk_parameters(Vd, dose, meas_times, concs)
+        if save_json:
+            if not os.path.exists(save_path):
+                os.makedirs(save_path)
+            with open(os.path.join(save_path, 'ct_curve.json'), 'w') as f:
+                json.dump({'times': times.tolist(), 'concs': concs.tolist()}, f)
+            with open(os.path.join(save_path, 'pk_params.json'), 'w') as f:
+                json.dump(pk_params, f)
+        return pk_params
 
 if __name__ == "__main__":
     # smiles_list = ['C1(F)C=C2C(S(=O)(=O)C3C=C(N4CCNCC4)C(OC)=CC=3)=CN(CC)C2=CC=1',
@@ -180,15 +204,24 @@ if __name__ == "__main__":
     #             'C1(=CNC2C=CC(C#N)=CC1=2)CCCCN1CCN(C2N=CC(C3C=CC(C(N)=O)=CC=3)=CN=2)CC1',
     #             'COC1=C(OCCCN2CCOCC2)C=C3C(N=CN=C3NC4=CC(Cl)=C(F)C=C4)=C1']
     from rdkit.Chem import PandasTools
+    # mol_list = PandasTools.LoadSDF('test.sdf')['ROMol']
+    df = pd.read_csv('/vepfs/fs_users/cuiyaning/data/spk/data/CT1127_clean_iv_test.csv')
+    smiles_list = df['SMILES'].tolist()
 
-    mol_list = PandasTools.LoadSDF('test.sdf')['ROMol']
-    main(smiles_list=None,
-        mol_list=mol_list, 
+    model_dir = 'output_po/pk_NeuralODE_3_log_mae_time_exp_decay'
+    pk_params = main(smiles_list=smiles_list,
+        mol_list=None, 
         dose=1,
         dose_route=1, 
         batch_size=4, 
-        model_path='/vepfs/fs_qsar/pk_model/pk_NeuralODE_3_log_mae_time_exp_decay',
-        save_json=True,
-        save_path='./',
+        model_path=model_dir,
+        save_json=False,
+        save_path=model_dir,
+        return_all=True,
         )
+    
+    # df = pd.DataFrame(pk_params)
+    # df.to_csv('output/pk_NeuralODE_3_log_mae_time_exp_decay/pk_params.csv', index=False)
+
+
 
