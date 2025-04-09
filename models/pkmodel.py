@@ -40,7 +40,7 @@ class UniPKModel(nn.Module):
         else:
             raise ValueError(f"method {self.method} not supported")
            
-    def forward(self, params, route, doses, meas_times):
+    def forward(self, params, route, doses, meas_times, min_step=1e-4):
         if len(params.shape)==1:
             params = params.unsqueeze(0)  # for single sample
         
@@ -63,9 +63,9 @@ class UniPKModel(nn.Module):
 
         init_conditions = C
         if self.method in ['NeuralODE', 'NeuralODE2']:
-            solution  = odeint(lambda t, y: self.cmptmodel(t, y, params, V0), init_conditions, meas_times, options={"min_step": 1e-4},rtol=1e-3,atol=1e-4)
+            solution  = odeint(lambda t, y: self.cmptmodel(t, y, params, V0), init_conditions, meas_times, options={"min_step": min_step},rtol=1e-3,atol=1e-4)
         else:
-            solution  = odeint(lambda t, y: self.cmptmodel(t, y, params), init_conditions, meas_times, options={"min_step": 1e-4},rtol=1e-3,atol=1e-4)
+            solution  = odeint(lambda t, y: self.cmptmodel(t, y, params), init_conditions, meas_times, options={"min_step": min_step},rtol=1e-3,atol=1e-4)
         return solution
 
 def get_model_params(method, route, num_cmpts):
