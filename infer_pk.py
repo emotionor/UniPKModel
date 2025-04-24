@@ -57,14 +57,22 @@ def pk_infer(model_path,
             method='NeuralODE',
             num_folds=5,
             return_all=False,
+            config=None,
             ):
     meas_times = torch.tensor(meas_times, device=device, dtype=torch.float64)
-
+    if config is not None:
+        node_mid_dim = config.get('node_mid_dim', 64)
+        vd_mid_dim = config.get('vd_mid_dim', 32)
     concs_total = []
     Vd_total = []
     for fold in range(num_folds):
         model = UniMolModel(output_dim=output_dim, return_rep=return_rep).to(device)
-        pk_model = UniPKModel(num_cmpts=num_cmpts, route=route, method=method).to(device)
+        pk_model = UniPKModel(num_cmpts=num_cmpts, 
+                              route=route, 
+                              method=method, 
+                              node_mid_dim=node_mid_dim,
+                              vd_mid_dim=vd_mid_dim,
+                              ).to(device)
         model_state_dict = torch.load(os.path.join(model_path, f'best_model_fold_{fold+1}.pth'), map_location=device)
         model.load_state_dict(model_state_dict['model_state_dict'])
         pk_model.load_state_dict(model_state_dict['pk_model_state_dict'])
@@ -175,6 +183,7 @@ def main(
         method=method,
         num_folds=num_folds,
         return_all=return_all,
+        config=config,
         )
 
     if return_all:
@@ -208,7 +217,7 @@ if __name__ == "__main__":
     df = pd.read_csv('/vepfs/fs_users/cuiyaning/data/spk/data/CT1127_clean_iv_test.csv')
     smiles_list = df['SMILES'].tolist()
 
-    model_dir = 'output_po/pk_NeuralODE_3_log_mae_time_exp_decay'
+    model_dir = 'output_po7/pk_NeuralODE_3_log_mae_time_exp_decay_128_128'
     pk_params = main(smiles_list=smiles_list,
         mol_list=None, 
         dose=1,

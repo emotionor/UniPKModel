@@ -430,13 +430,13 @@ class MixPKModel2(BaseCompartmentModel):
             params = params.unsqueeze(0)
 
         Cl, V1, k1, k2, k3, k4 = params[:,0], params[:,1], params[:,2], params[:,3], params[:,4], params[:,5]
-        rate_constants = params[:, 6:].view(-1, 2, self.num_compartments - 1)
 
         C = y[:self.num_compartments]
         dC_dt = torch.zeros_like(C)
         dC_dt[0] = - (Cl + k1 * C[0] / (k2 + C[0]) + k3 / (k4 + C[0])) / V1 * C[0]
 
         if self.num_compartments > 1:
+            rate_constants = params[:, 6:].view(-1, 2, self.num_compartments - 1)
             for i in range(1, self.num_compartments):
                 dC_dt[0] +=  - rate_constants[:, 0, i-1] * C[0] + rate_constants[:, 1, i-1] * C[i]
                 dC_dt[i] = rate_constants[:, 0, i-1] * C[0] - rate_constants[:, 1, i-1] * C[i]
