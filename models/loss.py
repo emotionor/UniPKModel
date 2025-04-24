@@ -161,6 +161,7 @@ def log_mse_loss(y_preds, y_true, **kwargs):
     return loss
 
 def log_mae_time_exp_decay_loss(y_preds, y_true, times=None, **kwargs):
+    times = times/times.max() * kwargs.get('alpha', 1)
     times = times.broadcast_to(y_preds.shape)
     time_decay = torch.exp(-times)
     mask = torch.isfinite(y_true) & torch.isfinite(y_preds)
@@ -215,7 +216,7 @@ def log_mse_time_exp_decay_loss(y_preds, y_true, times=None, **kwargs):
 
 def log_mae_time_linear_decay_loss(y_preds, y_true, times=None, **kwargs):
     times = times.broadcast_to(y_preds.shape)
-    time_decay = 1 - times / times.max()
+    time_decay = 1 - times / times.max() * kwargs.get('alpha', 1)
     mask = torch.isfinite(y_true) & torch.isfinite(y_preds)
     y_preds = y_preds[mask]+1e-5
     y_true = y_true[mask]+1e-5

@@ -5,7 +5,9 @@ from torch.nn.utils import clip_grad_norm_
 from models.loss import get_loss_fn
 from utils import logger
 
-def train_epoch(model, dataloader, pk_model, scheduler, optimizer, device, scaler=None, loss_fn=None):
+def train_epoch(model, dataloader, pk_model, scheduler, optimizer, device, scaler, config):
+    loss_fn = config.get('loss_fn', None)
+    loss_alpha = config.get('loss_alpha', 1)
     model.train()
     start_time = time.time()
     for net_inputs, net_targets in dataloader:
@@ -14,10 +16,10 @@ def train_epoch(model, dataloader, pk_model, scheduler, optimizer, device, scale
 
         if scaler is not None:
             with torch.cuda.amp.autocast():
-                loss = pkct_loss(net_inputs, net_targets, model, pk_model, loss_fn)
+                loss = pkct_loss(net_inputs, net_targets, model, pk_model, loss_fn, loss_alpha)
         else:   
             with torch.set_grad_enabled(True):
-                loss = pkct_loss(net_inputs, net_targets, model, pk_model, loss_fn)
+                loss = pkct_loss(net_inputs, net_targets, model, pk_model, loss_fn, loss_alpha)
 
         if scaler is not None:
             scaler.scale(loss).backward()
@@ -35,17 +37,19 @@ def train_epoch(model, dataloader, pk_model, scheduler, optimizer, device, scale
     lr = optimizer.param_groups[0]['lr']
     return loss.item(), duration, lr
 
-def validate_epoch(model, dataloader, pk_model, device, loss_fn=None):
+def validate_epoch(model, dataloader, pk_model, device, config):
+    loss_fn = config.get('loss_fn', None)
+    loss_alpha = config.get('loss_alpha', 1)
     model.eval()
     total_loss = 0
     with torch.no_grad():
         for net_inputs, net_targets in dataloader:
             net_inputs, net_targets = decorate_torch_batch(net_inputs, net_targets, device)
-            loss = pkct_loss(net_inputs, net_targets, model, pk_model, loss_fn)
+            loss = pkct_loss(net_inputs, net_targets, model, pk_model, loss_fn, loss_alpha)
             total_loss += loss.item()
     return total_loss / len(dataloader)
 
-def pkct_loss(input, targets, model, pk_model, loss_fn=None):
+def pkct_loss(input, targets, model, pk_model, loss_fn=None, loss_alpha=1):
     route, doses, meas_times, meas_conc_iv, _ = process_net_targets(targets)
     outputs = model(**input)
     pk_model = pk_model.double()
@@ -53,7 +57,7 @@ def pkct_loss(input, targets, model, pk_model, loss_fn=None):
     y_pred = solution[:,0].transpose(0, 1)
     y_pred = y_pred.clamp(min=0)
     loss_func = get_loss_fn(loss_fn)
-    loss = loss_func(y_pred, meas_conc_iv, times=meas_times)
+    loss = loss_func(y_pred, meas_conc_iv, times=meas_times, alpha=loss_alpha)
     return loss
 
 def process_net_targets(targets):
