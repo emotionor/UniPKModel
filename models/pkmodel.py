@@ -46,6 +46,9 @@ class UniPKModel(nn.Module):
         if len(params.shape)==1:
             params = params.unsqueeze(0)  # for single sample
         
+        if len(meas_times.shape) == 2:
+            meas_times = meas_times[0]
+
         if self.method in ['NeuralODE', 'NeuralODE2']:
             V0 = self.volumeD(params, doses)
         else:
