@@ -33,8 +33,9 @@ class UniPKModel(nn.Module):
         elif self.method == 'NeuralODE':
             node_mid_dim = kwargs.get('node_mid_dim', 64)
             vd_mid_dim = kwargs.get('vd_mid_dim', 32)
-            self.cmptmodel = NeuralODE(self.num_cmpts, route=self.route, input_dim=512, middle_dim=node_mid_dim)
-            self.volumeD = VolumeD(input_dim=512, middle_dim=vd_mid_dim)
+            species = kwargs.get('species', 'rat')
+            self.cmptmodel = NeuralODE(self.num_cmpts, route=self.route, input_dim=512, middle_dim=node_mid_dim, species=species, adapter_dim=512)
+            self.volumeD = VolumeD(input_dim=512, middle_dim=vd_mid_dim, species=species, adapter_dim=512)
         elif self.method == 'NeuralODE2':
             self.cmptmodel = NeuralODE2(self.num_cmpts, route=self.route, input_dim=512)
             self.volumeD = VolumeD(input_dim=512)
@@ -46,7 +47,7 @@ class UniPKModel(nn.Module):
             params = params.unsqueeze(0)  # for single sample
         
         if self.method in ['NeuralODE', 'NeuralODE2']:
-            V0 = self.volumeD(params)
+            V0 = self.volumeD(params, doses)
         else:
             V0 = params[:,1]
         C1 = doses / V0  # Dose / Vc as initial condition
@@ -64,7 +65,7 @@ class UniPKModel(nn.Module):
 
         init_conditions = C
         if self.method in ['NeuralODE', 'NeuralODE2']:
-            solution  = odeint(lambda t, y: self.cmptmodel(t, y, params, V0), init_conditions, meas_times, options={"min_step": self.min_step},rtol=1e-3,atol=1e-4)
+            solution  = odeint(lambda t, y: self.cmptmodel(t, y, params, V0, doses), init_conditions, meas_times, options={"min_step": self.min_step},rtol=1e-3,atol=1e-4)
         else:
             solution  = odeint(lambda t, y: self.cmptmodel(t, y, params), init_conditions, meas_times, options={"min_step": self.min_step},rtol=1e-3,atol=1e-4)
         return solution
@@ -94,58 +95,85 @@ class BaseCompartmentModel(nn.Module):
         self.num_compartments = num_compartments
         self.route = route
 
-    def forward(self, t, y, params, V0=None):
+    def forward(self, t, y, params, V0=None, doses=None):
         if self.route == 'i.v.':
-            return self.forward_iv(t, y, params, V0=V0)
+            return self.forward_iv(t, y, params, V0=V0, doses=doses)
         elif self.route == 'p.o.':
-            return self.forward_po(t, y, params, V0=V0)
+            return self.forward_po(t, y, params, V0=V0, doses=doses)
         else:
             raise ValueError(f"Unsupported route: {self.route}")
 
-    def forward_iv(self, t, y, params, V0=None):
+    def forward_iv(self, t, y, params, V0=None, doses=None):
         raise NotImplementedError
 
-    def forward_po(self, t, y, params, V0=None):
+    def forward_po(self, t, y, params, V0=None, doses=None):
         raise NotImplementedError
+
+class Adapter(nn.Module):
+    def __init__(self, input_dim, adapter_dim):
+        super(Adapter, self).__init__()
+        self.adapter = nn.Sequential(
+            nn.Linear(input_dim, adapter_dim),
+            nn.ReLU(),
+            nn.Linear(adapter_dim, input_dim),
+        )
+
+    def forward(self, x):
+        return self.adapter(x)
+    
 
 class VolumeD(nn.Module):
-    def __init__(self, input_dim, middle_dim=32):
+    def __init__(self, input_dim, middle_dim=32, species='rat', adapter_dim=32):
         super(VolumeD, self).__init__()
         self.net = nn.Sequential(
-            nn.Linear(input_dim, middle_dim),
+            nn.Linear(input_dim + 1, middle_dim),
             nn.ReLU(),
             nn.Linear(middle_dim, 1),
-            nn.Softplus(),
+            # nn.Softplus(),
         )
+        self.species = species
+        if species == 'human':
+            self.adapter = Adapter(input_dim + 1, adapter_dim)
+        self.Softplus = nn.Softplus()
     
-    def forward(self, x):
-        return self.net(x).squeeze(1)
+    def forward(self, x, doses):
+        x = torch.cat([x, doses.unsqueeze(1)], dim=-1)
+        if self.species == 'human':
+            x = self.adapter(x)
+        return self.Softplus(self.net(x).squeeze(1))
 
 
 class NeuralODE(BaseCompartmentModel):
-    def __init__(self, num_compartments, route='i.v.', input_dim=512, middle_dim=64):
+    def __init__(self, num_compartments, route='i.v.', input_dim=512, middle_dim=64, species='rat', adapter_dim=512):
         super(NeuralODE, self).__init__(num_compartments=num_compartments, route=route)
         self.input_dim = input_dim
         output_dim = num_compartments * 2 - 1
         self.net = nn.Sequential(
-            nn.Linear(input_dim + 1, middle_dim),
+            nn.Linear(input_dim + 2, middle_dim),
             nn.ReLU(),
             nn.Linear(middle_dim, output_dim),
-            nn.Softplus(),
+            # nn.Softplus(),
         )
         if route == 'p.o.':
             self.poka = nn.Sequential(
-                nn.Linear(input_dim + 1, middle_dim),
+                nn.Linear(input_dim + 2, middle_dim),
                 nn.ReLU(),
                 nn.Linear(middle_dim, 1),
-                nn.Softplus(),
+                # nn.Softplus(),
             )
+        self.species = species
+        if species == 'human':
+            self.adapter = Adapter(input_dim + 2, adapter_dim)
+            self.adapter_poka = Adapter(input_dim + 2, adapter_dim)
+        self.Softplus = nn.Softplus()
 
-    def forward_iv(self, t, y, params, V0):
+    def forward_iv(self, t, y, params, V0, doses):
         if len(params.shape) == 1:
             params = params.unsqueeze(0)
-
-        net_output = self.net(torch.cat([params, y[0].unsqueeze(1)], dim=-1))
+        net_input = torch.cat([params, y[0].unsqueeze(1), doses.unsqueeze(1)], dim=-1)
+        if self.species == 'human':
+            net_input = self.adapter(net_input)
+        net_output = self.Softplus(self.net(net_input))
         Cl = net_output[:, 0]
 
         C = y[:self.num_compartments]
@@ -160,14 +188,20 @@ class NeuralODE(BaseCompartmentModel):
 
         return dC_dt
     
-    def forward_po(self, t, y, params, V0):
+    def forward_po(self, t, y, params, V0, doses):
         if len(params.shape) == 1:
             params = params.unsqueeze(0)
 
-        net_output = self.net(torch.cat([params, y[0].unsqueeze(1)], dim=-1))
+        net_input = torch.cat([params, y[0].unsqueeze(1), doses.unsqueeze(1)], dim=-1)
+        if self.species == 'human':
+            net_input = self.adapter(net_input)
+        net_output = self.Softplus(self.net(net_input))
         Cl = net_output[:, 0]
 
-        ka = self.poka(torch.cat([params, y[0].unsqueeze(1)], dim=-1)).squeeze(1)
+        poka_input = torch.cat([params, y[0].unsqueeze(1), doses.unsqueeze(1)], dim=-1)
+        if self.species == 'human':
+            poka_input = self.adapter_poka(poka_input)
+        ka = self.Softplus(self.poka(poka_input)).squeeze(1)
 
         C = y[:self.num_compartments + 1]
         dC_dt = torch.zeros_like(C)

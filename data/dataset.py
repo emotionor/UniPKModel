@@ -8,6 +8,7 @@ from utils import logger
 class SMILESDataset(Dataset):
     def __init__(self, smiles_list, targets):
         self.samples = generate_conformers(smiles_list, targets)
+        self.subject_ids = [i for i in range(len(self.samples))]
 
     def __len__(self):
         return len(self.samples)

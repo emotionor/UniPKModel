@@ -8,7 +8,7 @@ from utils import logger
 def train_epoch(model, dataloader, pk_model, scheduler, optimizer, device, scaler, config):
     loss_fn = config.get('loss_fn', None)
     loss_alpha = config.get('loss_alpha', 1)
-    model.train()
+    # model.train()
     start_time = time.time()
     for net_inputs, net_targets in dataloader:
         net_inputs, net_targets = decorate_torch_batch(net_inputs, net_targets, device)
