@@ -14,7 +14,7 @@ from sklearn.model_selection import KFold
 from models.unimol import UniMolModel
 from data import load_or_create_dataset, SMILESDataset
 from utils import get_linear_schedule_with_warmup, read_yaml, save_yaml, logger
-from models import UniMolModel, UniPKModel, train_epoch, validate_epoch, decorate_torch_batch, get_model_params, process_net_targets, cal_all_losses
+from models import UniMolModel, UniPKModel, train_epoch, validate_epoch, decorate_torch_batch, get_model_params, cal_all_losses
 def setup_device():
     return torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -132,7 +132,11 @@ def test_model(model_path, filepath=None):
         with torch.no_grad():
             for net_inputs, net_targets in dataloader:
                 net_inputs, net_targets = decorate_torch_batch(net_inputs, net_targets, device)
-                route, doses, meas_times, meas_conc_iv, n = process_net_targets(net_targets)
+                route = net_targets['route']
+                doses = net_targets['dose']
+                meas_times = net_targets['time_points']
+                meas_conc_iv = net_targets['concentrations']
+                n = len(meas_times[0])
                 outputs = model(**net_inputs)
                 solution = pk_model(outputs, route, doses, meas_times)
                 y_pred_fold.append(solution[:,0].transpose(0, 1))

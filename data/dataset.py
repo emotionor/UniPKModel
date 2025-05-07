@@ -6,8 +6,8 @@ from data.conformer import ConformerGen
 from utils import logger
 
 class SMILESDataset(Dataset):
-    def __init__(self, smiles_list, targets):
-        self.samples = generate_conformers(smiles_list, targets)
+    def __init__(self, data_dicts):
+        self.samples = self.generate_conformers(data_dicts)
         self.subject_ids = [i for i in range(len(self.samples))]
 
     def __len__(self):
@@ -16,12 +16,23 @@ class SMILESDataset(Dataset):
     def __getitem__(self, idx):
         return self.samples[idx]
 
-def generate_conformers(smiles_list, targets):
-    conf_gen = ConformerGen()
-    inputs = conf_gen.transform(smiles_list)
-    assert len(inputs) == len(targets)
-    samples = list(zip(inputs, targets))
-    return samples
+    @staticmethod
+    def generate_conformers(data_dicts):
+        conf_gen = ConformerGen()
+        smiles_list = [entry['smiles'] for entry in data_dicts]
+        targets = [
+            {
+                'dose': entry['dose'],
+                'route': entry['route'],
+                'time_points': entry['time_points'],
+                'concentrations': entry['concentrations']
+            }
+            for entry in data_dicts
+        ]
+        inputs = conf_gen.transform(smiles_list)
+        assert len(inputs) == len(targets)
+        samples = list(zip(inputs, targets))
+        return samples
 
 def read_data(config, filepath):
     smiles_col = config['smiles_col']
@@ -33,11 +44,20 @@ def read_data(config, filepath):
     data = pd.read_csv(filepath)
     time_cols = [col for col in data.columns if col.startswith(time_cols_prefix)]
     conc_cols = [col for col in data.columns if col.startswith(conc_cols_prefix)]
-    target_cols = [route_col, dose_col] + time_cols + conc_cols
+    n = len(time_cols)
+    # Create a list of dictionaries
+    data_dicts = []
+    for i in range(len(data)):
+        entry = {
+            'smiles': data[smiles_col].iloc[i],
+            'dose': data[dose_col].iloc[i],
+            'route': data[route_col].iloc[i],
+            'time_points': data.iloc[i][time_cols].astype(float).values,
+            'concentrations': data.iloc[i][conc_cols].astype(float).values,
+        }
+        data_dicts.append(entry)
 
-    smiles_list = data[smiles_col].values
-    targets = data[target_cols].values
-    return smiles_list, targets
+    return data_dicts
 
 def load_or_create_dataset(config, split='train'):
     save_name = os.path.splitext(config[f'{split}_filepath'])[0] + '.pkl'
@@ -46,12 +66,12 @@ def load_or_create_dataset(config, split='train'):
         with open(save_name, 'rb') as f:
             dataset = pickle.load(f)
         if split == 'test':
-            smiles_list, targets = read_data(config, filepath=config[f'{split}_filepath'])
+            data_dicts = read_data(config, filepath=config[f'{split}_filepath'])
     else:
-        smiles_list, targets = read_data(config, filepath=config[f'{split}_filepath'])
-        dataset = SMILESDataset(smiles_list, targets)
+        data_dicts = read_data(config, filepath=config[f'{split}_filepath'])
+        dataset = SMILESDataset(data_dicts)
         with open(save_name, 'wb') as f:
             pickle.dump(dataset, f)
     if split == 'test':
-        return dataset, smiles_list, targets
+        return dataset, data_dicts
     return dataset
