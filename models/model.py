@@ -55,9 +55,10 @@ def pkct_loss(input, targets, model, pk_model, loss_fn=None, loss_alpha=1):
     doses = targets['dose']
     meas_times = targets['time_points']
     meas_conc_iv = targets['concentrations']
+    subject_id = targets['subject_id']
     outputs = model(**input)
     pk_model = pk_model.double()
-    solution = pk_model(outputs.double(), route.double(), doses.double(), meas_times.double())  # 确保 pk_model 的输入为双精度
+    solution = pk_model(outputs.double(), route.double(), doses.double(), meas_times.double(), subject_id)  # 确保 pk_model 的输入为双精度
     y_pred = solution[:,0].transpose(0, 1)
     y_pred = y_pred.clamp(min=0)
     loss_func = get_loss_fn(loss_fn)
