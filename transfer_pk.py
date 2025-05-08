@@ -160,8 +160,14 @@ def test_model(model_path, filepath=None):
         species=config.get('species', 'rat'),
     ).to(device)
 
-    dataset, smiles_list, targets = load_or_create_dataset(config, split='test')
-    #samples = generate_conformers(smiles_list, targets)
+    dataset, data_dict = load_or_create_dataset(config, split='test')
+    route_all = [i['route'] for i in data_dict]
+    doses_all = [i['dose'] for i in data_dict]
+    subject_ids_all = [i['subject_id'] for i in data_dict]
+    time_points = [i['time_points'] for i in data_dict]
+    concentrations = [i['concentrations'] for i in data_dict]
+    smiles_list = [i['smiles'] for i in data_dict]
+
     dataloader = TorchDataLoader(dataset, batch_size=config['batch_size'], shuffle=False, collate_fn=model.batch_collate_fn)
 
     y_pred = []
@@ -186,20 +192,27 @@ def test_model(model_path, filepath=None):
                 solution = pk_model(outputs, route, doses, meas_times)
                 y_pred_fold.append(solution[:,0].transpose(0, 1))
         y_pred_fold = torch.cat(y_pred_fold, dim=0)
-        metrics = cal_all_losses(y_pred_fold, torch.tensor(targets, device=device, dtype=y_pred_fold.dtype)[:,n+1:])
+        metrics = cal_all_losses(y_pred_fold, torch.tensor(concentrations, device=device, dtype=y_pred_fold.dtype)[:,n+1:])
         logger.info(f'Fold {fold} Test Metrics: {json.dumps(metrics, indent=4)}')
         y_pred.append(y_pred_fold)
     
     y_pred = torch.stack(y_pred, dim=0)
     y_pred = torch.mean(y_pred, dim=0)
-    metrics_dict = cal_all_losses(y_pred, torch.tensor(targets, device=device, dtype=y_pred_fold.dtype)[:,n+1:], save_path=model_path)
+    metrics_dict = cal_all_losses(y_pred, torch.tensor(concentrations, device=device, dtype=y_pred_fold.dtype)[:,n+1:], save_path=model_path)
     logger.info(f'Test Metrics: {json.dumps(metrics_dict, indent=4)}')
     
     with open(os.path.join(model_path, 'test_metrics.json'), 'w') as f:
         json.dump(metrics_dict, f, indent=4)
 
     df_smiles = pd.DataFrame(smiles_list, columns=['smiles'])
-    df_targets = pd.DataFrame(targets, columns=['route', 'dose']+[f'time_{i}' for i in range(len(y_pred[0]))]+[f'conc_{i}' for i in range(len(y_pred[0]))])
+    df_targets = pd.DataFrame({
+        'subject_id': subject_ids_all,
+        'smiles': smiles_list,
+        'route': route_all,
+        'dose': doses_all,
+        **{f'time_{i}': [tp[i] for tp in time_points] for i in range(len(time_points[0]))},
+        **{f'conc_{i}': [conc[i] for conc in concentrations] for i in range(len(concentrations[0]))}
+    })
     df_pred = pd.DataFrame(y_pred.cpu().numpy(), columns=[f'pred_conc_{i}' for i in range(len(y_pred[0]))])
     df = pd.concat([df_smiles, df_targets, df_pred], axis=1)
     save_name = os.path.join(model_path, os.path.splitext(os.path.basename(config['test_filepath']))[0] + '_pred.csv')

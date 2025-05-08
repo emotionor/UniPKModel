@@ -8,7 +8,6 @@ from utils import logger
 class SMILESDataset(Dataset):
     def __init__(self, data_dicts):
         self.samples = self.generate_conformers(data_dicts)
-        self.subject_ids = [i for i in range(len(self.samples))]
 
     def __len__(self):
         return len(self.samples)
@@ -25,7 +24,8 @@ class SMILESDataset(Dataset):
                 'dose': entry['dose'],
                 'route': entry['route'],
                 'time_points': entry['time_points'],
-                'concentrations': entry['concentrations']
+                'concentrations': entry['concentrations'],
+                'subject_id': entry['subject_id'],
             }
             for entry in data_dicts
         ]
@@ -54,6 +54,7 @@ def read_data(config, filepath):
             'route': data[route_col].iloc[i],
             'time_points': data.iloc[i][time_cols].astype(float).values,
             'concentrations': data.iloc[i][conc_cols].astype(float).values,
+            'subject_id': i if config.get('subject_id_col') is None else data[config['subject_id_col']].iloc[i],
         }
         data_dicts.append(entry)
 
