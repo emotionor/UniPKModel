@@ -48,7 +48,7 @@ def cal_all_losses(y_preds, y_true, **kwargs):
     loss_mse = torch.mean(mean_mse[torch.isfinite(mean_mse)])
     loss_rmse = torch.sqrt(loss_mse)
 
-    r2_scores = r2_scores[torch.isfinite(r2_scores)]
+    # r2_scores = r2_scores[torch.isfinite(r2_scores)]
     r2_scores.clip_(min=0, max=1)
     r2_nonzero_radio = torch.sum(r2_scores > 0) / r2_scores.shape[0]
     top30_r2 = torch.topk(r2_scores, int(0.3 * r2_scores.shape[0]), largest=True).values
