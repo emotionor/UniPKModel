@@ -50,7 +50,10 @@ def validate_epoch(model, dataloader, pk_model, device, config):
     return total_loss / len(dataloader)
 
 def pkct_loss(input, targets, model, pk_model, loss_fn=None, loss_alpha=1):
-    route, doses, meas_times, meas_conc_iv, _ = process_net_targets(targets)
+    route = targets['route']
+    doses = targets['dose']
+    meas_times = targets['time_points']
+    meas_conc_iv = targets['concentrations']
     outputs = model(**input)
     pk_model = pk_model.double()
     solution = pk_model(outputs.double(), route.double(), doses.double(), meas_times.double())  # 确保 pk_model 的输入为双精度
@@ -60,15 +63,9 @@ def pkct_loss(input, targets, model, pk_model, loss_fn=None, loss_alpha=1):
     loss = loss_func(y_pred, meas_conc_iv, times=meas_times, alpha=loss_alpha)
     return loss
 
-def process_net_targets(targets):
-    n = targets.shape[1] // 2
-    route = targets[:,0]
-    doses = targets[:,1]
-    meas_times = targets[:,2:n+1][0]
-    meas_conc_iv = targets[:,n+1:]
-    return route, doses, meas_times, meas_conc_iv, n
-
 def decorate_torch_batch(net_input, net_target, device):
-    net_input, net_target = {
-        k: v.to(device) for k, v in net_input.items()}, net_target.to(device)
+    net_input = {
+        k: v.to(device) for k, v in net_input.items()}
+    net_target = {
+        k: v.to(device) for k, v in net_target.items()}
     return net_input, net_target
