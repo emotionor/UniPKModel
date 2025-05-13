@@ -91,6 +91,37 @@ def get_model_params(method, route, num_cmpts):
         num_classes += 1
     return num_classes, method in ['NeuralODE', 'NeuralODE2']
 
+class CovariateEncoder(nn.Module):
+    def __init__(self, input_dim=3, latent_dim=512, **kwargs):
+        super().__init__()
+        self.encoder = nn.Sequential(
+            nn.Linear(input_dim, latent_dim),
+            nn.ReLU(),
+            nn.Linear(latent_dim, latent_dim)
+        )
+
+    def forward(self, sex, weight):
+        # sex: (B,) int (0 or 1)
+        sex_onehot = torch.nn.functional.one_hot(sex, num_classes=2).float()  # (B, 2)
+        x = torch.cat([sex_onehot, weight.unsqueeze(1)], dim=-1)  # (B, 3)
+        return self.encoder(x)
+    
+    def batch_collate_fn(self, samples):
+        batch = {}
+        for key in samples[0][0].keys():
+            if isinstance(samples[0][0][key], (list, tuple)):
+                batch[key] = torch.tensor([s[0][key] for s in samples], dtype=torch.float)
+            else:
+                batch[key] = torch.tensor([s[0][key] for s in samples])
+        label = {}
+        for key in samples[0][1].keys():
+            if isinstance(samples[0][1][key], (list, tuple)):
+                label[key] = torch.tensor([s[1][key] for s in samples], dtype=torch.float)
+            else:
+                label[key] = torch.tensor([s[1][key] for s in samples])
+        return batch, label
+
+
 class BaseCompartmentModel(nn.Module):
     def __init__(self, num_compartments, route='i.v.'):
         super(BaseCompartmentModel, self).__init__()
