@@ -4,6 +4,7 @@ import pickle
 from torch.utils.data import Dataset
 from data.conformer import ConformerGen
 from utils import logger
+import json
 
 class SMILESDataset(Dataset):
     def __init__(self, data_dicts):
@@ -17,8 +18,16 @@ class SMILESDataset(Dataset):
 
     @staticmethod
     def generate_conformers(data_dicts):
-        conf_gen = ConformerGen()
-        smiles_list = [entry['smiles'] for entry in data_dicts]
+        #conf_gen = ConformerGen()
+        #smiles_list = [entry['smiles'] for entry in data_dicts]
+        inputs = [
+            {
+                'sex': entry['sex'],
+                'weight': entry['weight'],
+            }
+            for entry in data_dicts
+        ] 
+
         targets = [
             {
                 'dose': entry['dose'],
@@ -29,7 +38,7 @@ class SMILESDataset(Dataset):
             }
             for entry in data_dicts
         ]
-        inputs = conf_gen.transform(smiles_list)
+        #inputs = conf_gen.transform(smiles_list)
         assert len(inputs) == len(targets)
         samples = list(zip(inputs, targets))
         return samples
@@ -40,6 +49,8 @@ def read_data(config, filepath):
     route_col = config['route_col']
     time_cols_prefix = config['time_cols_prefix']
     conc_cols_prefix = config['conc_cols_prefix']
+    sex_col = config.get('sex_col', 'sex')
+    weight_col = config.get('weight_col', 'weight')
 
     data = pd.read_csv(filepath)
     time_cols = [col for col in data.columns if col.startswith(time_cols_prefix)]
@@ -49,6 +60,8 @@ def read_data(config, filepath):
     data_dicts = []
     for i in range(len(data)):
         entry = {
+            'sex': data[sex_col].iloc[i],
+            'weight': data[weight_col].iloc[i],
             'smiles': data[smiles_col].iloc[i],
             'dose': data[dose_col].iloc[i],
             'route': data[route_col].iloc[i],
@@ -67,12 +80,23 @@ def load_or_create_dataset(config, split='train'):
         with open(save_name, 'rb') as f:
             dataset = pickle.load(f)
         if split == 'test':
-            data_dicts = read_data(config, filepath=config[f'{split}_filepath'])
-    else:
+            if config[f'{split}_filepath'].endswith('.json'):
+                with open(config[f'{split}_filepath'], 'r') as f:
+                    data_dicts = json.load(f)
+            else:
+                data_dicts = read_data(config, filepath=config[f'{split}_filepath'])
+    elif config[f'{split}_filepath'].endswith('.csv'):
         data_dicts = read_data(config, filepath=config[f'{split}_filepath'])
         dataset = SMILESDataset(data_dicts)
         with open(save_name, 'wb') as f:
             pickle.dump(dataset, f)
+    elif config[f'{split}_filepath'].endswith('.json'):
+        with open(config[f'{split}_filepath'], 'r') as f:
+            data_dicts = json.load(f)
+        dataset = SMILESDataset(data_dicts)
+        with open(save_name, 'wb') as f:
+            pickle.dump(dataset, f)
+
     if split == 'test':
         return dataset, data_dicts
     return dataset

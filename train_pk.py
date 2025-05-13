@@ -14,7 +14,7 @@ from sklearn.model_selection import KFold
 from models.unimol import UniMolModel
 from data import load_or_create_dataset, SMILESDataset
 from utils import get_linear_schedule_with_warmup, read_yaml, save_yaml, logger
-from models import UniMolModel, UniPKModel, train_epoch, validate_epoch, decorate_torch_batch, get_model_params,  cal_all_losses
+from models import UniMolModel, UniPKModel, train_epoch, validate_epoch, decorate_torch_batch, get_model_params,  cal_all_losses, CovariateEncoder
 def setup_device():
     return torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -51,7 +51,8 @@ def k_fold_cross_validation(dataset, config):
         torch.manual_seed(42)
         train_sampler = torch.utils.data.SubsetRandomSampler(train_idx)
         val_sampler = torch.utils.data.SubsetRandomSampler(val_idx)
-        model = UniMolModel(output_dim=output_dim, pretrain=config['pretrain'], return_rep=return_rep).to(device)
+        # model = UniMolModel(output_dim=output_dim, pretrain=config['pretrain'], return_rep=return_rep).to(device)
+        model = CovariateEncoder(input_dim=3, output_dim=512).to(device)
         pk_model = UniPKModel(
             num_cmpts=config['num_cmpts'], 
             route=config['route'], 
@@ -105,7 +106,8 @@ def test_model(model_path, filepath=None):
 
     device = setup_device()
     output_dim, return_rep = get_model_params(config['method'], config['route'], config['num_cmpts'])
-    model = UniMolModel(output_dim=output_dim, pretrain=config['pretrain'], return_rep=return_rep).to(device)
+    # model = UniMolModel(output_dim=output_dim, pretrain=config['pretrain'], return_rep=return_rep).to(device)
+    model = CovariateEncoder(input_dim=3, output_dim=512).to(device)
     pk_model = UniPKModel(
         num_cmpts=config['num_cmpts'], 
         route=config['route'], 
@@ -120,7 +122,7 @@ def test_model(model_path, filepath=None):
     subject_ids_all = [i['subject_id'] for i in data_dict]
     time_points = [i['time_points'] for i in data_dict]
     concentrations = [i['concentrations'] for i in data_dict]
-    smiles_list = [i['smiles'] for i in data_dict]
+    # smiles_list = [i['smiles'] for i in data_dict]
 
     dataloader = TorchDataLoader(dataset, batch_size=config['batch_size'], shuffle=False, collate_fn=model.batch_collate_fn)
 
@@ -158,19 +160,33 @@ def test_model(model_path, filepath=None):
     with open(os.path.join(model_path, 'test_metrics.json'), 'w') as f:
         json.dump(metrics_dict, f, indent=4)
 
-    df_smiles = pd.DataFrame(smiles_list, columns=['smiles'])
+    # df_smiles = pd.DataFrame(smiles_list, columns=['smiles'])
     df_targets = pd.DataFrame({
         'subject_id': subject_ids_all,
-        'smiles': smiles_list,
+        #'smiles': smiles_list,
         'route': route_all,
         'dose': doses_all,
         **{f'time_{i}': [tp[i] for tp in time_points] for i in range(len(time_points[0]))},
         **{f'conc_{i}': [conc[i] for conc in concentrations] for i in range(len(concentrations[0]))}
     })
     df_pred = pd.DataFrame(y_pred.cpu().numpy(), columns=[f'pred_conc_{i}' for i in range(len(y_pred[0]))])
-    df = pd.concat([df_smiles, df_targets, df_pred], axis=1)
+    df = pd.concat([df_targets, df_pred], axis=1)
     save_name = os.path.join(model_path, os.path.splitext(os.path.basename(config['test_filepath']))[0] + '_pred.csv')
     df.to_csv(save_name, index=False)
+
+    json_name = os.path.join(model_path, os.path.splitext(os.path.basename(config['test_filepath']))[0] + '_pred.json')
+    result_dict = {
+        'subject_id': subject_ids_all,
+        'route': route_all,
+        'dose': doses_all,
+        'time_points': time_points,
+        'concentrations': concentrations,
+        'predictions': y_pred.cpu().numpy().tolist(),
+    }
+    with open(json_name, 'w') as f:
+        json.dump(result_dict, f, indent=4)
+
+
     return df
 
 def train(config):
