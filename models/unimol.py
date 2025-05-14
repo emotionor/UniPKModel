@@ -124,7 +124,12 @@ class UniMolModel(BaseUnicoreModel):
             elif k == 'src_tokens':
                 v = pad_1d_tokens([torch.tensor(s[0][k]).long() for s in samples], pad_idx=self.padding_idx)
             batch[k] = v
-        label = torch.tensor([s[1] for s in samples]).float()
+        label = {}
+        for key in samples[0][1].keys():
+            if isinstance(samples[0][1][key], (list, tuple)):
+                label[key] = torch.tensor([s[1][key] for s in samples], dtype=torch.float)
+            else:
+                label[key] = torch.tensor([s[1][key] for s in samples])
         return batch, label
 
 def base_architecture():
