@@ -9,7 +9,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader as TorchDataLoader
 from torch.nn.utils import clip_grad_norm_
-from sklearn.model_selection import KFold
+from sklearn.model_selection import KFold, GroupKFold
 
 from models.unimol import UniMolModel
 from data import load_or_create_dataset, SMILESDataset
@@ -44,9 +44,11 @@ def k_fold_cross_validation(dataset, config):
     config['return_rep'] = return_rep
     setup_directories(config)
     device = setup_device()
-    kf = KFold(n_splits=config['k'], shuffle=True, random_state=42)
+    # kf = KFold(n_splits=config['k'], shuffle=True, random_state=42)
+    groups = [data[1]['dose'] for data in dataset]
+    gkf = GroupKFold(n_splits=config['k'])
     fold_results = []
-    for fold, (train_idx, val_idx) in enumerate(kf.split(dataset)):
+    for fold, (train_idx, val_idx) in enumerate(gkf.split(dataset, groups=groups)):
         logger.info(f'Fold {fold + 1}/{config["k"]}')
         torch.manual_seed(42)
         train_sampler = torch.utils.data.SubsetRandomSampler(train_idx)
@@ -91,10 +93,55 @@ def k_fold_cross_validation(dataset, config):
                 logger.info(f'Early Stopping at Epoch {epoch + 1}')
                 break
         
+        # Validate the model on the validation set
+        with torch.no_grad():
+            validate_model(model, pk_model, val_loader, device, fold + 1, config)
+
         fold_results.append(best_val_loss)
         logger.info(f'Best Validation Loss for fold {fold + 1}: {best_val_loss}')
     
     logger.info(f'Average Best Validation Loss: {np.mean(fold_results)}')
+
+def validate_model(model, pk_model, val_loader, device, fold, config):
+
+    route_all = []
+    doses_all = []
+    subject_ids_all = []
+    time_points = []
+    concentrations = []
+    y_pred_fold = []
+    for net_inputs, net_targets in val_loader:
+        net_inputs, net_targets = decorate_torch_batch(net_inputs, net_targets, device)
+        route = net_targets['route']
+        doses = net_targets['dose']
+        meas_times = net_targets['time_points']
+        meas_conc_iv = net_targets['concentrations']
+        outputs = model(**net_inputs)
+        pk_model = pk_model.double()
+        solution = pk_model(outputs.double(), route.double(), doses.double(), meas_times.double())
+        y_pred_fold.append(solution[:,0].transpose(0, 1))
+        route_all.extend(route.tolist())
+        doses_all.extend(doses.tolist())
+        subject_ids_all.extend(net_targets['subject_id'].tolist())
+        time_points.extend(meas_times.tolist())
+        concentrations.extend(meas_conc_iv.tolist())
+    y_pred_fold = torch.cat(y_pred_fold, dim=0)
+    metrics = cal_all_losses(y_pred_fold, torch.tensor(meas_conc_iv, device=device, dtype=y_pred_fold.dtype))
+    logger.info(f'Fold {fold} Validation Metrics: {json.dumps(metrics, indent=4)}')
+    with open(os.path.join(config['save_path'], f'fold_{fold}_metrics.json'), 'w') as f:
+        json.dump(metrics, f, indent=4)
+    result_dict = {
+        'subject_id': subject_ids_all,
+        'route': route_all,
+        'dose': doses_all,
+        'time_points': time_points,
+        'concentrations': concentrations,
+        'predictions': y_pred_fold.cpu().numpy().tolist(),
+    }
+    with open(os.path.join(config['save_path'], f'fold_{fold}_pred.json'), 'w') as f:
+        json.dump(result_dict, f, indent=4)
+    logger.info(f'Fold {fold} Validation Predictions saved.')
+    return 
 
 def test_model(model_path, filepath=None):
     config = read_yaml(os.path.join(model_path, 'config.yaml'))
