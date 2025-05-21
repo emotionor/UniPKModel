@@ -217,7 +217,7 @@ if __name__ == "__main__":
     df = pd.read_csv('/vepfs/fs_users/cuiyaning/data/spk/data/CT1127_clean_iv_test.csv')
     smiles_list = df['SMILES'].tolist()
 
-    model_dir = 'output_po7/pk_NeuralODE_3_log_mae_time_exp_decay_128_128'
+    model_dir = '/vepfs/fs_ckps/cuiyaning/pk/output_po/pk_NeuralODE_3_log_mae_time_exp_decay'
     pk_params = main(smiles_list=smiles_list,
         mol_list=None, 
         dose=1,
