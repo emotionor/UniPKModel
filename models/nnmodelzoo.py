@@ -132,4 +132,34 @@ class DistanceHead(nn.Module):
         x = (x + x.transpose(-1, -2)) * 0.5
         return x
 
+class TaskConditionedHead(nn.Module):
+    def __init__(self, input_dim: int, task_num: int, hidden_dim: int = 128, dropout: float = 0.1):
+        """
+        Transformer风格的共享主干 + Task调节（FiLM）
+        """
+        super().__init__()
+        self.task_emb = nn.Embedding(task_num, hidden_dim * 2)  # γ, β for FiLM
 
+        self.fc1 = nn.Linear(input_dim, hidden_dim)
+        self.dropout = nn.Dropout(dropout)
+        self.fc2 = nn.Linear(hidden_dim, 1)
+
+    def forward(self, mol_repr: torch.Tensor, task_id: torch.Tensor):
+        """
+        Args:
+            mol_repr: [B, D] 分子表征
+            task_id: [B]     任务ID
+        Returns:
+            pred: [B] 回归值
+        """
+        h = self.fc1(mol_repr)              # [B, H]
+        h = F.relu(h)
+        h = self.dropout(h)
+
+        # FiLM 调节
+        film_params = self.task_emb(task_id)  # [B, 2H]
+        gamma, beta = film_params.chunk(2, dim=-1)  # [B, H], [B, H]
+        h = gamma * h + beta
+
+        pred = self.fc2(h).squeeze(-1)  # [B]
+        return pred

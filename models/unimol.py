@@ -20,12 +20,10 @@ BACKBONE = {
     'transformer': TransformerEncoderWithPair,
 }
 
-class UniMolModel(BaseUnicoreModel):
-    def __init__(self, output_dim=2, pretrain='mol_pre_no_h_220816.pt', return_rep=False):
+class UniMolEncoder(BaseUnicoreModel):
+    def __init__(self, pretrain='mol_pre_no_h_220816.pt'):
         super().__init__()
         self.args = base_architecture()
-        self.output_dim = output_dim
-        self.return_rep = return_rep
         self.pretrain_path = os.path.join(PRE_TRAIN_WEIGHT_PATH, pretrain)
         self.dictionary =  Dictionary.load(DICT_PATH)
         self.mask_idx = self.dictionary.add_symbol("[MASK]", is_special=True)
@@ -52,13 +50,13 @@ class UniMolModel(BaseUnicoreModel):
             K, self.args.encoder_attention_heads, self.args.activation_fn
         )
         self.gbf = GaussianLayer(K, n_edge_type)
-        self.classification_head = ClassificationHead(
-            input_dim=self.args.encoder_embed_dim,
-            inner_dim=self.args.encoder_embed_dim,
-            num_classes=self.output_dim,
-            activation_fn=self.args.pooler_activation_fn,
-            pooler_dropout=self.args.pooler_dropout,
-        )
+        # self.classification_head = ClassificationHead(
+        #     input_dim=self.args.encoder_embed_dim,
+        #     inner_dim=self.args.encoder_embed_dim,
+        #     num_classes=self.output_dim,
+        #     activation_fn=self.args.pooler_activation_fn,
+        #     pooler_dropout=self.args.pooler_dropout,
+        # )
         self.apply(init_bert_params)
         self.load_pretrained_weights(path=self.pretrain_path)
 
@@ -106,11 +104,12 @@ class UniMolModel(BaseUnicoreModel):
             _,
             _,
         ) = self.encoder(x, padding_mask=padding_mask, attn_mask=graph_attn_bias)
-        if self.return_rep:
-            return encoder_rep[:, 0, :]
-        self.encoder_rep = encoder_rep
-        logits = self.classification_head(encoder_rep)
-        return logits
+        return encoder_rep[:, 0, :]
+        # if self.return_rep:
+        #     return encoder_rep[:, 0, :]
+        # self.encoder_rep = encoder_rep
+        # logits = self.classification_head(encoder_rep)
+        # return logits
 
     def batch_collate_fn(self, samples):
         batch = {}
