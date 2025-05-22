@@ -77,7 +77,7 @@ def train_validate_model(dataset, config, writer=None):
 
     for epoch in range(config['num_epochs']):
         logger.info(f"Epoch {epoch + 1}/{config['num_epochs']}")
-        train_loss = train_pair_epoch(train_loader, config, optimizer, scheduler, pk_encoder, pk_model, admet_encoder, admet_head, scaler=scaler, device=device, writer=writer, epoch=epoch)
+        train_loss, _, _ = train_pair_epoch(train_loader, config, optimizer, scheduler, pk_encoder, pk_model, admet_encoder, admet_head, scaler=scaler, device=device, writer=writer, epoch=epoch)
         val_loss = validate_pair_epoch(val_loader, config, pk_encoder, pk_model, admet_encoder, admet_head, device=device, writer=writer, epoch=epoch)
 
         logger.info(f"Train Loss: {train_loss:.4f}, Validation Loss: {val_loss:.4f}")
