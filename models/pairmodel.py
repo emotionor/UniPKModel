@@ -111,7 +111,11 @@ def pair_loss(input, pk_encoder, pk_model, admet_encoder, admet_head, loss_fn=No
     loss_admet = F.mse_loss(y_pred_admet, task_label)
 
     per_sample_mse = F.mse_loss(pk_encoder_outputs, admet_encoder_outputs, reduction='none').mean(dim=1)
-    loss_align = (sim_score * per_sample_mse).mean()
+    # loss_align = (sim_score * per_sample_mse).mean()
+    margin, beta = 1, 0.5
+    loss_align_pos = (sim_score * per_sample_mse).mean()
+    loss_align_neg = ((1 - sim_score) * F.relu(margin - per_sample_mse)).mean()
+    loss_align = loss_align_pos + beta * loss_align_neg
 
     lambda_pk, lambda_admet, lambda_align = 1, 1, 0.2
     loss = lambda_pk * loss_pk + lambda_admet * loss_admet + lambda_align * loss_align
