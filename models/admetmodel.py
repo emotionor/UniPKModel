@@ -100,7 +100,11 @@ def admet_loss(input, admet_encoder, admet_head, loss_fn=None, loss_alpha=1):
     # loss_pk = loss_func(y_pred, meas_conc_iv, times=meas_times, alpha=loss_alpha)
 
     y_pred_admet = admet_head(admet_encoder_outputs, task_id)
-    loss_admet = F.mse_loss(y_pred_admet, task_label)
+
+    # mae loss
+    loss_admet = F.l1_loss(y_pred_admet, task_label)
+    # mse loss
+    # loss_admet = F.mse_loss(y_pred_admet, task_label)
 
     loss = loss_admet
     # per_sample_mse = F.mse_loss(pk_encoder_outputs, admet_encoder_outputs, reduction='none').mean(dim=1)
