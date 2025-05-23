@@ -24,7 +24,14 @@ class ADMETDataset(Dataset):
         if task_vocab is None:
             task_names = sorted(set(d['task_name'] for d in self.data))
             self.task_vocab = {name: i for i, name in enumerate(task_names)}
-        else:
+            with open(os.path.splitext(json_path)[0] + '_task_vocab.json', 'w') as f:
+                json.dump(self.task_vocab, f)
+            logger.info(f'Created task vocab: {self.task_vocab}')
+        elif isinstance(task_vocab, str):
+            with open(task_vocab, 'r') as f:
+                self.task_vocab = json.load(f)
+            logger.info(f'Loaded task vocab from {task_vocab}')
+        elif isinstance(task_vocab, dict):
             self.task_vocab = task_vocab
 
         self.task_num = len(self.task_vocab)
@@ -125,16 +132,22 @@ def admet_batch_collate_fn(batch):
 
     return batch_dict
 
-def load_or_create_admet_dataset(config):
-    save_name = os.path.splitext(config['admet_data_path'])[0] + '.pkl'
+def load_or_create_admet_dataset(config, split='train'):
+    if split == 'train':
+        admet_path = config['admet_data_path']
+    elif split == 'test':
+        admet_path = config['admet_test_data_path']
+    else:
+        raise ValueError(f"Invalid split: {split}. Expected 'train' or 'test'.")
+    save_name = os.path.splitext(admet_path)[0] + '.pkl'
     if os.path.exists(save_name):
         with open(save_name, 'rb') as f:
             dataset = torch.load(f)
             logger.info(f'Loaded dataset from {save_name}')
     else:
-        logger.info(f'Creating dataset from {config["admet_data_path"]}')
+        logger.info(f'Creating dataset from {admet_path}')
         dataset = ADMETDataset(
-            json_path=config['admet_data_path'],
+            json_path=admet_path,
             task_vocab=config.get('task_vocab', None),
             task_stats=config.get('task_stats', None),
         )

@@ -4,4 +4,4 @@ from .unimol import UniMolEncoder
 from .pkmodel import UniPKModel, get_model_params
 from .loss import get_loss_fn, cal_all_losses
 from .nnmodelzoo import TaskConditionedHead
-from .admetmodel import train_admet_epoch, validate_admet_epoch, admet_loss
+from .admetmodel import train_admet_epoch, validate_admet_epoch, admet_loss, admet_decorate_torch_batch

@@ -24,7 +24,7 @@ class UniMolEncoder(BaseUnicoreModel):
     def __init__(self, pretrain='mol_pre_no_h_220816.pt'):
         super().__init__()
         self.args = base_architecture()
-        self.pretrain_path = os.path.join(PRE_TRAIN_WEIGHT_PATH, pretrain)
+        self.pretrain_path = os.path.join(PRE_TRAIN_WEIGHT_PATH, pretrain) if pretrain else None
         self.dictionary =  Dictionary.load(DICT_PATH)
         self.mask_idx = self.dictionary.add_symbol("[MASK]", is_special=True)
         self.padding_idx = self.dictionary.pad()

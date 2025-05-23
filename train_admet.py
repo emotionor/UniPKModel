@@ -14,7 +14,7 @@ from sklearn.model_selection import KFold
 
 from data import load_or_create_admet_dataset, admet_batch_collate_fn
 from utils import get_linear_schedule_with_warmup, read_yaml, save_yaml, logger
-from models import UniMolEncoder, UniPKModel, train_admet_epoch, validate_admet_epoch, decorate_torch_batch, get_model_params, TaskConditionedHead
+from models import UniMolEncoder, UniPKModel, train_admet_epoch, validate_admet_epoch, admet_decorate_torch_batch, get_model_params, TaskConditionedHead
 def setup_device():
     return torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -78,6 +78,8 @@ def train_validate_model(dataset, config, writer=None):
             best_epoch = epoch
             save_model_state(os.path.join(config['save_path'], f'best_model_epoch_{epoch + 1}.pth'), admet_encoder, admet_head)
             logger.info(f"Best model saved at epoch {epoch + 1} with validation loss {best_val_loss:.4f}")
+        elif epoch % 100 == 0:
+            logger.info(f"Epoch {epoch + 1} validation loss did not improve. Current best: {best_val_loss:.4f} at epoch {best_epoch + 1}")
         else:
             logger.info(f"No improvement in validation loss. Best model at epoch {best_epoch + 1} with loss {best_val_loss:.4f}")
     logger.info(f"Training completed. Best model at epoch {best_epoch + 1} with validation loss {best_val_loss:.4f}")
@@ -94,7 +96,62 @@ def train_admet(config):
     save_model_state(os.path.join(config['save_path'], 'final_model.pth'), admet_encoder, admet_head)
     logger.info("Final model saved.")
 
+def test_admet(config):
+    
+    device = setup_device()
+    # Load the test dataset
+    test_dataset = load_or_create_admet_dataset(config, split='test')
+    test_loader = TorchDataLoader(test_dataset, batch_size=config['batch_size'], shuffle=False, collate_fn=admet_batch_collate_fn)
+
+    # Load the best model
+    model_path = os.path.join(config['save_path'], f'final_model.pth')
+    model_state_dict = torch.load(model_path)
+    admet_encoder = UniMolEncoder(pretrain=None)
+    admet_encoder.load_state_dict(model_state_dict['admet_encoder_state_dict'])
+    admet_head = TaskConditionedHead(
+        input_dim=config.get('admet_embed_dim', 512),
+        task_num=test_dataset.task_num,
+        hidden_dim=config.get('admet_hidden_dim', 512),
+        dropout=config.get('admet_dropout', 0.1),
+    )
+    admet_head.load_state_dict(model_state_dict['admet_head_state_dict'])
+    admet_encoder.to(device)
+    admet_head.to(device)
+
+    
+    admet_encoder.eval()
+    admet_head.eval()
+
+    predictions = {
+        'task_id': [],
+        'task_label': [],
+        'predictions': []
+    }
+    id_find_name = {v: k for k, v in test_dataset.task_vocab.items()}
+    with torch.no_grad():
+        for batch in test_loader:
+            inputs = admet_decorate_torch_batch(batch, device)
+            admet_encoder_outputs = admet_encoder(**inputs['net_inputs_admet'])
+            outputs = admet_head(admet_encoder_outputs, inputs['task_id'])
+            predictions['task_id'].append(inputs['task_id'].cpu().numpy())
+            
+            task_names = [id_find_name[i] for i in inputs['task_id'].cpu().numpy()]
+
+            denormalized_labels = [test_dataset.normalizer.denormalize(name, label) for name, label in zip(task_names, inputs['task_label'].cpu().numpy())]
+            predictions['task_label'].append(denormalized_labels)
+            
+            denormalized_outputs = [test_dataset.normalizer.denormalize(name, output) for name, output in zip(task_names, outputs.cpu().numpy())]
+            predictions['predictions'].append(denormalized_outputs)
+
+    for key in predictions:
+        predictions[key] = np.concatenate(predictions[key], axis=0)
+    # Save predictions to a CSV file
+    df = pd.DataFrame(predictions)
+    df.to_csv(os.path.join(config['save_path'], 'predictions.csv'), index=False)
+    logger.info("Test predictions saved.")
+
 if __name__ == "__main__":
     # Load model config
-    config = read_yaml('config/config_admet.yaml')
-    train_admet(config)
+    # config = read_yaml('config/config_admet.yaml')
+    # train_admet(config)
+    pass
