@@ -68,57 +68,41 @@ def validate_admet_epoch(dataloader, config, admet_encoder, admet_head, device=N
 
     admet_encoder.eval()
     admet_head.eval()
-
+    step = epoch * len(dataloader)  
     total_loss = 0
     with torch.no_grad():
-        for net_inputs in dataloader:
+        for batch_idx, net_inputs in enumerate(dataloader):
             net_inputs = admet_decorate_torch_batch(net_inputs, device)
             loss, loss_dict = admet_loss(
                 net_inputs, admet_encoder, admet_head, loss_fn, loss_alpha
             )
             total_loss += loss.item()
-    return total_loss / len(dataloader)
+
+            if writer is not None:
+                global_step = step + batch_idx
+                writer.add_scalar('val/loss', loss.item(), global_step)
+                for k, v in loss_dict.items():
+                    writer.add_scalar(f'val/{k}', v, global_step)
+
+    val_loss = total_loss / len(dataloader)
+    if writer is not None:
+        writer.add_scalar('val/avg_loss', val_loss, epoch)
+    logger.info(f"Validation Loss: {val_loss:.4f}")
+    return val_loss
 
 
 def admet_loss(input, admet_encoder, admet_head, loss_fn=None, loss_alpha=1):
-    # route = input['route']
-    # doses = input['dose']
-    # meas_times = input['times']
-    # meas_conc_iv = input['concs']
-    # mask = input['mask']
     task_id = input['task_id']
     task_label = input['task_label']
-    # sim_score = input['sim_score']
 
-    # pk_encoder_outputs = pk_encoder(**input['net_inputs_pk'])
     admet_encoder_outputs = admet_encoder(**input['net_inputs_admet'])
-
-    # solution = pk_model(pk_encoder_outputs, route, doses, meas_times) 
-    # y_pred = solution[:,0].transpose(0, 1)
-    # y_pred = y_pred.clamp(min=0)
-    # loss_func = get_loss_fn(loss_fn)
-    # loss_pk = loss_func(y_pred, meas_conc_iv, times=meas_times, alpha=loss_alpha)
-
     y_pred_admet = admet_head(admet_encoder_outputs, task_id)
 
     # mae loss
     loss_admet = F.l1_loss(y_pred_admet, task_label)
-    # mse loss
-    # loss_admet = F.mse_loss(y_pred_admet, task_label)
 
-    loss = loss_admet
-    # per_sample_mse = F.mse_loss(pk_encoder_outputs, admet_encoder_outputs, reduction='none').mean(dim=1)
-    # margin, beta = 1, 0.5
-    # loss_align_pos = (sim_score * per_sample_mse).mean()
-    # loss_align_neg = ((1 - sim_score) * F.relu(margin - per_sample_mse)).mean()
-    # loss_align = loss_align_pos + beta * loss_align_neg
-
-    # lambda_pk, lambda_admet, lambda_align = 1, 1, 0.2
-    # loss = lambda_pk * loss_pk + lambda_admet * loss_admet + lambda_align * loss_align
-    return loss, {
-        # 'loss_pk': loss_pk.item(),
+    return loss_admet, {
         'loss_admet': loss_admet.item(),
-        # 'loss_align': loss_align.item(),
     }
 
 

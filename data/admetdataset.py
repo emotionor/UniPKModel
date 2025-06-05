@@ -9,34 +9,22 @@ from data.conformer import ConformerGen
 from utils import logger, pad_1d_tokens, pad_2d, pad_coords
 
 class ADMETDataset(Dataset):
-    def __init__(self, json_path: str, task_vocab: Dict[str, int] = None, task_stats: Dict[str, Dict[str, float]] = None):
-        """
-        Args:
-            json_path: 路径，包含 pair_data.json
-            tokenizer_fn: 分子tokenizer函数（如UniMol/SMILES编码器），返回torch tensor
-            task_vocab: 可选，task_name -> task_id 映射字典
-            max_len: 分子tokenizer的最大长度
-        """
+    def __init__(self, json_path: str, task_vocab: Dict[str, int]):
+
         with open(json_path, 'r') as f:
             self.data = json.load(f)
 
-        # 构建 task_id 映射
-        if task_vocab is None:
-            task_names = sorted(set(d['task_name'] for d in self.data))
-            self.task_vocab = {name: i for i, name in enumerate(task_names)}
-            with open(os.path.splitext(json_path)[0] + '_task_vocab.json', 'w') as f:
-                json.dump(self.task_vocab, f)
-            logger.info(f'Created task vocab: {self.task_vocab}')
-        elif isinstance(task_vocab, str):
+        if isinstance(task_vocab, str):
             with open(task_vocab, 'r') as f:
                 self.task_vocab = json.load(f)
             logger.info(f'Loaded task vocab from {task_vocab}')
         elif isinstance(task_vocab, dict):
             self.task_vocab = task_vocab
+            logger.info('Using provided task vocab')
 
         self.task_num = len(self.task_vocab)
 
-        self.normalizer = AdmetTaskNormalizer(task_stats) if task_stats is not None else None
+        self.normalizer = AdmetTaskNormalizer(self.task_vocab)
 
         self.admet_unimol_inputs = self.generate_conformers(self.data)
 
@@ -64,7 +52,7 @@ class ADMETDataset(Dataset):
 
         # ADMET
         task_name = item['task_name']
-        task_id = self.task_vocab[task_name]
+        task_id = self.task_vocab[task_name]['id']
         task_label_raw = item['task_label']
         if self.normalizer is not None:
             task_label = torch.tensor(
@@ -148,8 +136,7 @@ def load_or_create_admet_dataset(config, split='train'):
         logger.info(f'Creating dataset from {admet_path}')
         dataset = ADMETDataset(
             json_path=admet_path,
-            task_vocab=config.get('task_vocab', None),
-            task_stats=config.get('task_stats', None),
+            task_vocab=config['task_vocab'],
         )
         with open(save_name, 'wb') as f:
             torch.save(dataset, f)
@@ -166,8 +153,6 @@ class AdmetTaskNormalizer:
             ...
         }
         """
-        with open(task_stats, 'r') as f:
-            task_stats = json.load(f)
         self.task_stats = task_stats
 
     def normalize(self, task_name: str, value: float) -> float:

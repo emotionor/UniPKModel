@@ -10,7 +10,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader as TorchDataLoader
 from torch.nn.utils import clip_grad_norm_
 from torch.utils.tensorboard import SummaryWriter
-from sklearn.model_selection import KFold
+from sklearn.model_selection import KFold, train_test_split
 
 from data import load_or_create_admet_dataset, admet_batch_collate_fn
 from utils import get_linear_schedule_with_warmup, read_yaml, save_yaml, logger
@@ -38,6 +38,25 @@ def save_model_state(path, admet_encoder, admet_head):
     }
     torch.save(model_state_dict, path)
 
+def stratified_split(dataset, task_ids, train_ratio=0.8):
+    """
+    Perform stratified split based on task_ids.
+    Args:
+        dataset: The full dataset.
+        task_ids: List of task IDs corresponding to each sample in the dataset.
+        train_ratio: Ratio of training data (default: 0.8).
+    Returns:
+        train_dataset, val_dataset: Stratified train and validation datasets.
+    """
+    train_indices, val_indices = train_test_split(
+        range(len(dataset)),
+        test_size=1 - train_ratio,
+        stratify=task_ids
+    )
+    train_dataset = torch.utils.data.Subset(dataset, train_indices)
+    val_dataset = torch.utils.data.Subset(dataset, val_indices)
+    return train_dataset, val_dataset
+
 def train_validate_model(dataset, config, writer=None):
     output_dim, return_rep = get_model_params(config['method'], config['route'], config['num_cmpts'])
     config['output_dim'] = output_dim
@@ -54,9 +73,14 @@ def train_validate_model(dataset, config, writer=None):
         ).to(device)
 
     # split dataset into train and validation sets
-    train_size = int(0.8 * len(dataset))
-    val_size = len(dataset) - train_size
-    train_dataset, val_dataset = torch.utils.data.random_split(dataset, [train_size, val_size])
+    # train_size = int(0.8 * len(dataset))
+    # val_size = len(dataset) - train_size
+    # train_dataset, val_dataset = torch.utils.data.random_split(dataset, [train_size, val_size])
+    task_ids = [s['task_id'] for s in dataset]
+    train_dataset, val_dataset = stratified_split(dataset, task_ids, train_ratio=config.get('train_ratio', 0.8))
+    logger.info(f"Training dataset size: {len(train_dataset)}, Validation dataset size: {len(val_dataset)}")
+
+
     train_loader = TorchDataLoader(train_dataset, batch_size=config['batch_size'], shuffle=True, collate_fn=admet_batch_collate_fn)
     val_loader = TorchDataLoader(val_dataset, batch_size=config['batch_size'], shuffle=False, collate_fn=admet_batch_collate_fn)
 
@@ -76,10 +100,11 @@ def train_validate_model(dataset, config, writer=None):
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             best_epoch = epoch
-            save_model_state(os.path.join(config['save_path'], f'best_model_epoch_{epoch + 1}.pth'), admet_encoder, admet_head)
+            save_model_state(os.path.join(config['save_path'], f'best_model_epoch.pth'), admet_encoder, admet_head)
             logger.info(f"Best model saved at epoch {epoch + 1} with validation loss {best_val_loss:.4f}")
-        elif epoch % 100 == 0:
-            logger.info(f"Epoch {epoch + 1} validation loss did not improve. Current best: {best_val_loss:.4f} at epoch {best_epoch + 1}")
+        elif epoch % (config['num_epochs'] // 10) == 0:
+            logger.info(f"Epoch {epoch + 1} validation loss: {val_loss:.4f}, best so far: {best_val_loss:.4f}")
+            save_model_state(os.path.join(config['save_path'], f'latest/model_epoch_{epoch + 1}.pth'), admet_encoder, admet_head)
         else:
             logger.info(f"No improvement in validation loss. Best model at epoch {best_epoch + 1} with loss {best_val_loss:.4f}")
     logger.info(f"Training completed. Best model at epoch {best_epoch + 1} with validation loss {best_val_loss:.4f}")
@@ -104,7 +129,7 @@ def test_admet(config):
     test_loader = TorchDataLoader(test_dataset, batch_size=config['batch_size'], shuffle=False, collate_fn=admet_batch_collate_fn)
 
     # Load the best model
-    model_path = os.path.join(config['save_path'], f'final_model.pth')
+    model_path = os.path.join(config['save_path'], f'best_model_epoch.pth')
     model_state_dict = torch.load(model_path)
     admet_encoder = UniMolEncoder(pretrain=None)
     admet_encoder.load_state_dict(model_state_dict['admet_encoder_state_dict'])
