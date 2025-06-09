@@ -1,5 +1,5 @@
 import torch
-
+import torch.nn.functional as F
 
 def get_loss_fn(loss_fn):
     loss_fns = {
@@ -15,6 +15,7 @@ def get_loss_fn(loss_fn):
         'log_nmae_time_linear_decay': log_nmae_time_linear_decay_loss,
         'log_nmae_time_exp_decay': log_nmae_time_exp_decay_loss,
         'log_nmae_time_cos_decay': log_nmae_time_cos_decay_loss,
+        'mixed_pk_loss': mixed_pk_loss,
     }
     return loss_fns.get(loss_fn, log_mae_loss)
 
@@ -319,3 +320,65 @@ def log_mse_time_cos_decay_loss(y_preds, y_true, times=None, **kwargs):
     mean_log_mse = torch.stack([torch.mean(log_mse[unique_values == i]) for i in unique_indices])
     loss = torch.mean(mean_log_mse[torch.isfinite(mean_log_mse)])
     return loss
+
+def mixed_pk_loss(y_preds, y_true, times, alpha=1.0, lambda_peak=0.5, lambda_auc=0.1, eps=1e-5, **kwargs):
+    """
+    混合 PK 曲线预测 loss:
+    - 时间加权 log MAE
+    - Cmax（最大值）loss
+    - AUC loss
+    - 曲线平滑性 loss（可选）
+
+    Args:
+        y_preds: [B, T] 预测值
+        y_true:  [B, T] 真实值
+        times:   [T]    时间点
+        alpha:   float  时间加权因子
+        lambda_peak:   float Cmax 权重
+        lambda_auc:    float AUC 权重
+        lambda_smooth: float 平滑性权重
+
+    Returns:
+        loss: float
+        metrics: dict
+    """
+    B, T = y_preds.shape
+    device = y_preds.device
+
+    times = times / times.max() * alpha
+    times = times.expand(B, T)
+    time_decay = torch.exp(-times)
+
+    mask = torch.isfinite(y_true) & torch.isfinite(y_preds)
+    y_preds = torch.where(mask, y_preds, torch.tensor(eps, device=device))
+    y_true = torch.where(mask, y_true, torch.tensor(eps, device=device))
+    time_decay = torch.where(mask, time_decay, torch.tensor(0.0, device=device))
+
+    # 时间加权 log MAE
+    log_mae = torch.abs(torch.log(y_preds + eps) - torch.log(y_true + eps)) * time_decay
+    mean_log_mae = torch.sum(log_mae, dim=1) / torch.sum(mask, dim=1)
+    loss_main = torch.mean(mean_log_mae)
+
+    # Cmax loss
+    cmax_pred = torch.max(y_preds, dim=1).values
+    cmax_true = torch.max(y_true, dim=1).values
+    loss_peak = F.l1_loss(cmax_pred, cmax_true)
+
+    # AUC loss
+    auc_pred = torch.trapz(y_preds, times, dim=1)
+    auc_true = torch.trapz(y_true, times, dim=1)
+    loss_auc = F.l1_loss(auc_pred, auc_true)
+
+
+    # 总 loss
+    loss = (
+        loss_main +
+        lambda_peak * loss_peak +
+        lambda_auc * loss_auc
+    )
+
+    return loss, {
+        "loss_main": loss_main.item(),
+        "loss_peak": loss_peak.item(),
+        "loss_auc": loss_auc.item(),
+    }

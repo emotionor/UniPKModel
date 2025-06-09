@@ -10,6 +10,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader as TorchDataLoader
 from torch.nn.utils import clip_grad_norm_
 from sklearn.model_selection import KFold, GroupKFold
+from torch.utils.tensorboard import SummaryWriter
 
 from models.unimol import UniMolModel
 from data import load_or_create_dataset, SMILESDataset
@@ -38,7 +39,7 @@ def save_model_state(model, pk_model, path):
     }
     torch.save(model_state_dict, path)
 
-def k_fold_cross_validation(dataset, config):
+def k_fold_cross_validation(dataset, config, writer=None):
     output_dim, return_rep = get_model_params(config['method'], config['route'], config['num_cmpts'])
     config['output_dim'] = output_dim
     config['return_rep'] = return_rep
@@ -75,8 +76,8 @@ def k_fold_cross_validation(dataset, config):
         early_stop_patience = config.get('early_stop_patience', 10)
         for epoch in range(config['num_epochs']):
             try:
-                train_loss, duration, lr = train_epoch(model, train_loader, pk_model, scheduler, optimizer, device, scaler, config)
-                val_loss = validate_epoch(model, val_loader, pk_model, device, config)
+                train_loss, duration, lr = train_epoch(model, train_loader, pk_model, scheduler, optimizer, device, scaler, config, writer=writer, epoch=epoch)
+                val_loss = validate_epoch(model, val_loader, pk_model, device, config, writer=writer, epoch=epoch)
             except Exception as e:
                 logger.error(f'Error in Epoch {epoch + 1}: {e}')
                 break
@@ -237,8 +238,9 @@ def test_model(model_path, filepath=None):
     return df
 
 def train(config):
+    writer = SummaryWriter(log_dir=config['save_path'])
     dataset = load_or_create_dataset(config, split='train')
-    k_fold_cross_validation(dataset, config)
+    k_fold_cross_validation(dataset, config, writer=writer)
 
 if __name__ == '__main__':
     config = read_yaml('config/config.yaml')
