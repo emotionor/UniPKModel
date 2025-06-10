@@ -16,6 +16,7 @@ def get_loss_fn(loss_fn):
         'log_nmae_time_exp_decay': log_nmae_time_exp_decay_loss,
         'log_nmae_time_cos_decay': log_nmae_time_cos_decay_loss,
         'mixed_pk_loss': mixed_pk_loss,
+        'mixed_pk_tail_loss': mixed_pk_tail_loss,
     }
     return loss_fns.get(loss_fn, log_mae_loss)
 
@@ -322,31 +323,11 @@ def log_mse_time_cos_decay_loss(y_preds, y_true, times=None, **kwargs):
     return loss
 
 def mixed_pk_loss(y_preds, y_true, times, alpha=1.0, lambda_peak=0.5, lambda_auc=0.1, eps=1e-5, **kwargs):
-    """
-    混合 PK 曲线预测 loss:
-    - 时间加权 log MAE
-    - Cmax（最大值）loss
-    - AUC loss
-    - 曲线平滑性 loss（可选）
 
-    Args:
-        y_preds: [B, T] 预测值
-        y_true:  [B, T] 真实值
-        times:   [T]    时间点
-        alpha:   float  时间加权因子
-        lambda_peak:   float Cmax 权重
-        lambda_auc:    float AUC 权重
-        lambda_smooth: float 平滑性权重
-
-    Returns:
-        loss: float
-        metrics: dict
-    """
-    B, T = y_preds.shape
     device = y_preds.device
 
     times = times / times.max() * alpha
-    times = times.expand(B, T)
+    times = times.expand(y_preds.shape)
     time_decay = torch.exp(-times)
 
     mask = torch.isfinite(y_true) & torch.isfinite(y_preds)
@@ -354,7 +335,7 @@ def mixed_pk_loss(y_preds, y_true, times, alpha=1.0, lambda_peak=0.5, lambda_auc
     y_true = torch.where(mask, y_true, torch.tensor(eps, device=device))
     time_decay = torch.where(mask, time_decay, torch.tensor(0.0, device=device))
 
-    # 时间加权 log MAE
+    # === Log-MAE with time decay ===
     log_mae = torch.abs(torch.log(y_preds + eps) - torch.log(y_true + eps)) * time_decay
     mean_log_mae = torch.sum(log_mae, dim=1) / torch.sum(mask, dim=1)
     loss_main = torch.mean(mean_log_mae)
@@ -382,3 +363,64 @@ def mixed_pk_loss(y_preds, y_true, times, alpha=1.0, lambda_peak=0.5, lambda_auc
         "loss_peak": loss_peak.item(),
         "loss_auc": loss_auc.item(),
     }
+
+def mixed_pk_tail_loss(y_preds, y_true, times=None, alpha=1.0, lambda_peak=0.5, lambda_auc=0.1, lambda_log=0.0, lambda_tail=0.0, eps=1e-5, **kwargs):
+
+    new_times = times / times.max() * alpha
+    new_times = new_times.broadcast_to(y_preds.shape)
+
+    time_decay = torch.exp(-new_times)
+    mask = torch.isfinite(y_true) & torch.isfinite(y_preds)
+    y_preds_masked = torch.where(mask, y_preds, torch.tensor(eps, device=y_preds.device))
+    y_true_masked = torch.where(mask, y_true, torch.tensor(eps, device=y_preds.device))
+    time_decay = torch.where(mask, time_decay, torch.tensor(0.0, device=y_preds.device))
+
+    # === Log-MAE with time decay ===
+    log_mae = torch.abs(torch.log(y_preds_masked + eps) - torch.log(y_true_masked + eps)) * time_decay
+    mean_log_mae = torch.sum(log_mae, dim=1) / torch.sum(mask, dim=1)
+    loss_main = torch.mean(mean_log_mae)
+
+    # === Cmax (peak) loss ===
+    peak_pred = torch.amax(y_preds_masked, dim=1)
+    peak_true = torch.amax(y_true_masked, dim=1)
+    loss_peak = F.l1_loss(peak_pred, peak_true)
+
+    # === AUC loss ===
+    auc_pred = torch.trapz(y_preds_masked, x=times, dim=1)
+    auc_true = torch.trapz(y_true_masked, x=times, dim=1)
+    loss_auc = F.l1_loss(auc_pred, auc_true)
+
+    # === log-space full loss ===
+    loss_log = F.l1_loss(torch.log(y_preds_masked + eps), torch.log(y_true_masked + eps))
+
+    # === tail slope penalty ===
+    # approximate dC/dt ~ (C[t+1] - C[t]) / dt
+    loss_tail = compute_tail_slope_penalty(y_preds_masked, times, eps)
+
+    loss = (
+        loss_main +
+        lambda_peak * loss_peak +
+        lambda_auc * loss_auc +
+        lambda_log * loss_log +
+        lambda_tail * loss_tail
+    )
+    return loss, {
+        "loss": loss.item(),
+        "loss_main": loss_main.item(),
+        "loss_peak": loss_peak.item(),
+        "loss_auc": loss_auc.item(),
+        "loss_log": loss_log.item(),
+        "loss_tail": loss_tail.item()
+    }
+
+def compute_tail_slope_penalty(y_preds, times, eps):
+    c1 = torch.clamp(y_preds[:, -2], min=eps)
+    c2 = torch.clamp(y_preds[:, -1], min=eps)
+    t1 = times[:, -2]
+    t2 = times[:, -1]
+    dt = torch.clamp(t2 - t1, min=eps)
+
+    slope = (torch.log(c2) - torch.log(c1)) / dt  # log-slope
+    penalty_tail = torch.clamp(-slope, min=0.0) ** 2  # 仅惩罚快速下降
+    loss_tail = torch.mean(penalty_tail)
+    return loss_tail

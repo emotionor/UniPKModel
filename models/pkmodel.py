@@ -162,14 +162,14 @@ class NeuralODE(BaseCompartmentModel):
         self.input_dim = input_dim
         output_dim = num_compartments * 2 - 1
         self.net = nn.Sequential(
-            nn.Linear(input_dim + 1, middle_dim),
+            nn.Linear(input_dim + 3, middle_dim),
             nn.ReLU(),
             nn.Linear(middle_dim, output_dim),
             nn.Softplus(),
         )
         if route == 'p.o.':
             self.poka = nn.Sequential(
-                nn.Linear(input_dim + 1, middle_dim),
+                nn.Linear(input_dim + 3, middle_dim),
                 nn.ReLU(),
                 nn.Linear(middle_dim, 1),
                 nn.Softplus(),
@@ -179,7 +179,10 @@ class NeuralODE(BaseCompartmentModel):
         if len(params.shape) == 1:
             params = params.unsqueeze(0)
 
-        net_output = self.net(torch.cat([params, y[0].unsqueeze(1)], dim=-1))
+        C0 = y[0].unsqueeze(1)  # Ensure C0 is a column vector
+        C0_feature = torch.cat([C0, C0**2, torch.log(C0 + 1e-5)], dim=-1)  
+        net_output = self.net(torch.cat([params, C0_feature], dim=-1))
+        # net_output = torch.exp(net_output)  # Ensure positive output
         Cl = net_output[:, 0]
 
         C = y[:self.num_compartments]
@@ -198,10 +201,14 @@ class NeuralODE(BaseCompartmentModel):
         if len(params.shape) == 1:
             params = params.unsqueeze(0)
 
-        net_output = self.net(torch.cat([params, y[0].unsqueeze(1)], dim=-1))
+        C0 = y[0].unsqueeze(1)  # Ensure C0 is a column vector
+        C0_feature = torch.cat([C0, C0**2, torch.log(C0 + 1e-5)], dim=-1)  
+        net_output = self.net(torch.cat([params, C0_feature], dim=-1))
+        # net_output = torch.exp(net_output)  # Ensure positive output
         Cl = net_output[:, 0]
 
-        ka = self.poka(torch.cat([params, y[0].unsqueeze(1)], dim=-1)).squeeze(1)
+        ka = self.poka(torch.cat([params, C0_feature], dim=-1)).squeeze(1)
+        # ka = torch.exp(ka)
 
         C = y[:self.num_compartments + 1]
         dC_dt = torch.zeros_like(C)
