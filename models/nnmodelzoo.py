@@ -163,3 +163,19 @@ class TaskConditionedHead(nn.Module):
 
         pred = self.fc2(h).squeeze(-1)  # [B]
         return pred
+
+class MLPDecoder(nn.Module):
+    def __init__(self, input_dim: int, hidden_dim: int = 128, output_dim: int = 4, dropout: float = 0.1):
+        super(MLPDecoder, self).__init__()
+        self.model = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, output_dim)
+        )
+
+    def forward(self, mol_repr):
+        return self.model(mol_repr)
