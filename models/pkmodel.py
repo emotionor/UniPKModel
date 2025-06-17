@@ -52,7 +52,9 @@ class UniPKModel(nn.Module):
             V0 = self.volumeD(params)
         else:
             V0 = params[:,1]
-        C1 = doses / V0  # Dose / Vc as initial condition
+
+        V0 = torch.clamp(V0, min=1e-3)
+        C1 = doses * 1000 / V0  # Dose / Vc as initial condition
         
         batch_size = C1.shape[0]
 
@@ -149,10 +151,11 @@ class NeuralODE(BaseCompartmentModel):
             params = params.unsqueeze(0)
 
         C0 = y[0].unsqueeze(1)  # Ensure C0 is a column vector
-        C0_feature = torch.cat([C0, C0**2, torch.log(C0 + 1e-5)], dim=-1)  
+        C0_clamped = torch.clamp(C0, min=1e-3)
+        C0_feature = torch.cat([C0_clamped, C0_clamped**2, torch.log(C0_clamped + 1e-5)], dim=-1)  
         net_output = self.net(torch.cat([params, C0_feature], dim=-1))
         # net_output = torch.exp(net_output)  # Ensure positive output
-        Cl = net_output[:, 0]
+        Cl = torch.clamp(net_output[:, 0], max=1e3)
 
         C = y[:self.num_compartments]
         dC_dt = torch.zeros_like(C)
@@ -164,6 +167,7 @@ class NeuralODE(BaseCompartmentModel):
                 dC_dt[0] +=  - rate_constants[:, 0, i-1] * C[0] + rate_constants[:, 1, i-1] * C[i]
                 dC_dt[i] = rate_constants[:, 0, i-1] * C[0] - rate_constants[:, 1, i-1] * C[i]
 
+        
         return dC_dt
     
     def forward_po(self, t, y, params, V0):
@@ -171,10 +175,11 @@ class NeuralODE(BaseCompartmentModel):
             params = params.unsqueeze(0)
 
         C0 = y[0].unsqueeze(1)  # Ensure C0 is a column vector
-        C0_feature = torch.cat([C0, C0**2, torch.log(C0 + 1e-5)], dim=-1)  
+        C0_clamped = torch.clamp(C0, min=1e-3)
+        C0_feature = torch.cat([C0_clamped, C0_clamped**2, torch.log(C0_clamped + 1e-5)], dim=-1)  
         net_output = self.net(torch.cat([params, C0_feature], dim=-1))
         # net_output = torch.exp(net_output)  # Ensure positive output
-        Cl = net_output[:, 0]
+        Cl = torch.clamp(net_output[:, 0], max=1e3)
 
         ka = self.poka(torch.cat([params, C0_feature], dim=-1)).squeeze(1)
         # ka = torch.exp(ka)
