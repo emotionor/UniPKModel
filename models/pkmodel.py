@@ -53,7 +53,7 @@ class UniPKModel(nn.Module):
         else:
             V0 = params[:,1]
 
-        V0 = torch.clamp(V0, min=1e-3)
+        V0 = torch.clamp(V0, min=1e-3) # add this will add time cost
         C1 = doses * 1000 / V0  # Dose / Vc as initial condition
         
         batch_size = C1.shape[0]
@@ -133,14 +133,14 @@ class NeuralODE(BaseCompartmentModel):
         self.input_dim = input_dim
         output_dim = num_compartments * 2 - 1
         self.net = nn.Sequential(
-            nn.Linear(input_dim + 3, middle_dim),
+            nn.Linear(input_dim + 2, middle_dim),
             nn.ReLU(),
             nn.Linear(middle_dim, output_dim),
             nn.Softplus(),
         )
         if route == 'p.o.':
             self.poka = nn.Sequential(
-                nn.Linear(input_dim + 3, middle_dim),
+                nn.Linear(input_dim + 2, middle_dim),
                 nn.ReLU(),
                 nn.Linear(middle_dim, 1),
                 nn.Softplus(),
@@ -152,10 +152,11 @@ class NeuralODE(BaseCompartmentModel):
 
         C0 = y[0].unsqueeze(1)  # Ensure C0 is a column vector
         C0_clamped = torch.clamp(C0, min=1e-3)
-        C0_feature = torch.cat([C0_clamped, C0_clamped**2, torch.log(C0_clamped + 1e-5)], dim=-1)  
+        C0_feature = torch.cat([C0_clamped, torch.log(C0_clamped)], dim=-1)  
         net_output = self.net(torch.cat([params, C0_feature], dim=-1))
-        # net_output = torch.exp(net_output)  # Ensure positive output
+        # net_output = self.net(torch.cat([params, C0], dim=-1))
         Cl = torch.clamp(net_output[:, 0], max=1e3)
+        # Cl = net_output[:, 0]
 
         C = y[:self.num_compartments]
         dC_dt = torch.zeros_like(C)
@@ -176,10 +177,11 @@ class NeuralODE(BaseCompartmentModel):
 
         C0 = y[0].unsqueeze(1)  # Ensure C0 is a column vector
         C0_clamped = torch.clamp(C0, min=1e-3)
-        C0_feature = torch.cat([C0_clamped, C0_clamped**2, torch.log(C0_clamped + 1e-5)], dim=-1)  
+        C0_feature = torch.cat([C0_clamped, torch.log(C0_clamped)], dim=-1)  
         net_output = self.net(torch.cat([params, C0_feature], dim=-1))
-        # net_output = torch.exp(net_output)  # Ensure positive output
+        # net_output = self.net(torch.cat([params, C0], dim=-1))
         Cl = torch.clamp(net_output[:, 0], max=1e3)
+        # Cl = net_output[:, 0]
 
         ka = self.poka(torch.cat([params, C0_feature], dim=-1)).squeeze(1)
         # ka = torch.exp(ka)
