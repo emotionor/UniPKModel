@@ -52,7 +52,7 @@ class UniPKModel(nn.Module):
             V0 = self.volumeD(params)
         else:
             V0 = params[:,1]
-        C1 = doses / V0  # Dose / Vc as initial condition
+        C1 = doses *1000 / V0  # Dose / Vc as initial condition
         
         batch_size = C1.shape[0]
 

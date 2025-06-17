@@ -55,7 +55,7 @@ def train_validate_model(dataset, config, writer=None):
         ).to(device)
     admet_head = MLPDecoder(
         input_dim=config.get('admet_embed_dim', 512),
-        output_dim=5,
+        output_dim=1,
         hidden_dim=config.get('admet_hidden_dim', 512),
         dropout=config.get('admet_dropout', 0.1),
         ).to(device)

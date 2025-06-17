@@ -120,13 +120,13 @@ class PairPKADMETDataset(Dataset):
             # "net_inputs_admet": net_inputs_admet, #
             # "task_id": task_id,             # ADMET任务类型
             "task_type": task_type,           # 任务类型，0: PK, 1: ADMET
-            "task_labels": task_labels,       # ADMET标签
+            "task_labels": task_labels[0:1],       # ADMET标签
             "dose": dose,                 # 剂量
             "route": route,               # 给药途径
             "times": times,                 # PK时间点
             "concs": concs,                 # 浓度值
             "mask_pk": mask_pk,                   # 缺失mask
-            "mask_admet": mask_admet,             # ADMET缺失mask
+            "mask_admet": mask_admet[0:1],             # ADMET缺失mask
             # "sim_score": sim_score          # 相似度
         }
 
@@ -177,17 +177,17 @@ class AdmetTaskNormalizer:
     def __init__(self):
         self.mean = torch.tensor([
             0.03603095933794975,
-            0.6204385161399841,
-            -0.8656634092330933,
-            0.6435319781303406,
-            0.6698230504989624
+            # 0.6204385161399841,
+            # -0.8656634092330933,
+            # 0.6435319781303406,
+            # 0.6698230504989624
         ])
         self.std = torch.tensor([
             0.6401094198226929,
-            0.64908766746521,
-            0.7735370397567749,
-            0.6420132517814636,
-            0.6233038902282715
+            # 0.64908766746521,
+            # 0.7735370397567749,
+            # 0.6420132517814636,
+            # 0.6233038902282715
         ])
 
     def normalize(self, value):

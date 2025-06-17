@@ -7,8 +7,8 @@ from models.loss import get_loss_fn
 from utils import logger
 
 def train_pair_epoch(dataloader, config, optimizer, scheduler, pk_encoder, pk_model, admet_head,scaler=None, device=None, writer=None, epoch=0):
-    loss_fn = config.get('loss_fn', None)
-    loss_alpha = config.get('loss_alpha', 1)
+    # loss_fn = config.get('loss_fn', None)
+    # loss_alpha = config.get('loss_alpha', 1)
     clip_grad = config.get('clip_grad', 5.0)
 
     pk_encoder.train()
@@ -26,12 +26,12 @@ def train_pair_epoch(dataloader, config, optimizer, scheduler, pk_encoder, pk_mo
         if scaler is not None:
             with torch.cuda.amp.autocast():
                 loss, loss_dict = pair_loss(
-                    net_inputs, pk_encoder, pk_model, admet_head, loss_fn, loss_alpha
+                    net_inputs, pk_encoder, pk_model, admet_head, **config
                 )
         else:   
             with torch.set_grad_enabled(True):
                 loss, loss_dict = pair_loss(
-                    net_inputs, pk_encoder, pk_model, admet_head, loss_fn, loss_alpha
+                    net_inputs, pk_encoder, pk_model, admet_head, **config
                 )
 
         if scaler is not None:
@@ -66,8 +66,8 @@ def train_pair_epoch(dataloader, config, optimizer, scheduler, pk_encoder, pk_mo
     return avg_loss, duration, optimizer.param_groups[0]['lr']
 
 def validate_pair_epoch(dataloader, config, pk_encoder, pk_model, admet_head, device=None, writer=None, epoch=0):
-    loss_fn = config.get('loss_fn', None)
-    loss_alpha = config.get('loss_alpha', 1)
+    # loss_fn = config.get('loss_fn', None)
+    # loss_alpha = config.get('loss_alpha', 1)
 
     pk_encoder.eval()
     pk_model.eval()
@@ -78,7 +78,7 @@ def validate_pair_epoch(dataloader, config, pk_encoder, pk_model, admet_head, de
         for batch_idx, net_inputs in enumerate(dataloader):
             net_inputs = pair_decorate_torch_batch(net_inputs, device)
             loss, loss_dict = pair_loss(
-                net_inputs, pk_encoder, pk_model, admet_head, loss_fn, loss_alpha
+                net_inputs, pk_encoder, pk_model, admet_head, **config
             )
             total_loss += loss.item()
 
@@ -91,7 +91,7 @@ def validate_pair_epoch(dataloader, config, pk_encoder, pk_model, admet_head, de
     return total_loss / len(dataloader)
 
 
-def pair_loss(input, pk_encoder, pk_model, admet_head, loss_fn=None, loss_alpha=1):
+def pair_loss(input, pk_encoder, pk_model, admet_head, **kwargs):
     route = input['route']
     doses = input['dose']
     meas_times = input['times']
@@ -102,6 +102,11 @@ def pair_loss(input, pk_encoder, pk_model, admet_head, loss_fn=None, loss_alpha=
     mask_pk = input['mask_pk']
     mask_admet = input['mask_admet']
     task_type = input['task_type']
+
+    loss_fn = kwargs.get('loss_fn', 'log_mae_time_exp_decay')
+    loss_alpha = kwargs.get('loss_alpha', 1)
+    lambda_pk = kwargs.get('lambda_pk', 1)
+    lambda_admet = kwargs.get('lambda_admet', 1)
 
     encoder_outputs = pk_encoder(**input['net_inputs_pk'])
 
@@ -127,9 +132,7 @@ def pair_loss(input, pk_encoder, pk_model, admet_head, loss_fn=None, loss_alpha=
     loss_pk = loss_func(y_pred, meas_conc_iv, times=meas_times, alpha=loss_alpha)
 
     y_pred_admet = admet_head(admet_encoder_outputs)
-    loss_admet = F.mse_loss(y_pred_admet[~mask_admet], task_labels[~mask_admet])
-
-    lambda_pk, lambda_admet = 1, 1
+    loss_admet = F.l1_loss(y_pred_admet[~mask_admet], task_labels[~mask_admet])
 
     if len(mask_pk) == 0:
         loss_pk = torch.tensor(0.0, device=loss_admet.device)
