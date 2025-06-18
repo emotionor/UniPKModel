@@ -72,12 +72,12 @@ def k_fold_cross_validation(dataset, config, writer=None):
         early_stop_counter = 0
         early_stop_patience = config.get('early_stop_patience', 10)
         for epoch in range(config['num_epochs']):
-            # try:
-            train_loss, duration, lr = train_epoch(model, train_loader, pk_model, scheduler, optimizer, config, scaler=scaler, device=device, writer=writer, epoch=epoch)
-            val_loss = validate_epoch(model, val_loader, pk_model, config, device=device, writer=writer, epoch=epoch)
-            # except Exception as e:
-            #     logger.error(f'Error in Epoch {epoch + 1}: {e}')
-            #     break
+            try:
+                train_loss, duration, lr = train_epoch(model, train_loader, pk_model, scheduler, optimizer, config, scaler=scaler, device=device, writer=writer, epoch=epoch)
+                val_loss = validate_epoch(model, val_loader, pk_model, config, device=device, writer=writer, epoch=epoch)
+            except Exception as e:
+                logger.error(f'Error in Epoch {epoch + 1}: {e}')
+                break
             logger.info(f'Epoch {epoch + 1}/{config["num_epochs"]}: Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}, Duration: {duration:.2f}s, LR: {lr:.6f}')
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
