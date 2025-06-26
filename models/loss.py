@@ -1,11 +1,12 @@
 import torch
-
+import torch.nn.functional as F
 
 def get_loss_fn(loss_fn):
     loss_fns = {
         'log_mae': log_mae_loss,
         'log_mse': log_mse_loss,
         'log_mae_time_exp_decay': log_mae_time_exp_decay_loss,
+        'log_mae_time_exp_decay_v2': log_mae_time_exp_decay_v2_loss,
         'log_mse_time_exp_decay': log_mse_time_exp_decay_loss,
         'log_mae_time_linear_decay': log_mae_time_linear_decay_loss,
         'log_mse_time_linear_decay': log_mse_time_linear_decay_loss,
@@ -318,4 +319,32 @@ def log_mse_time_cos_decay_loss(y_preds, y_true, times=None, **kwargs):
 
     mean_log_mse = torch.stack([torch.mean(log_mse[unique_values == i]) for i in unique_indices])
     loss = torch.mean(mean_log_mse[torch.isfinite(mean_log_mse)])
+    return loss
+
+def log_mae_time_exp_decay_v2_loss(y_preds, y_true, times, alpha=1.0, eps=1e-5, **kwargs):
+    """统一的基础损失计算函数"""
+    device = y_preds.device
+    mask = torch.isfinite(y_true) & torch.isfinite(y_preds)
+    
+    # 处理数据和掩码
+    y_preds_masked = torch.where(mask, y_preds, torch.tensor(eps, device=device))
+    y_true_masked = torch.where(mask, y_true, torch.tensor(eps, device=device))
+    
+    # 处理时间衰减
+    time_decay = torch.ones_like(y_preds_masked)
+    norm_times = times / times.max() * alpha
+    norm_times = norm_times.broadcast_to(y_preds.shape)
+    
+    time_decay = torch.exp(-norm_times)
+    time_decay = torch.where(mask, time_decay, torch.tensor(0.0, device=device)) #
+    error = F.l1_loss(torch.log(y_preds_masked + eps), torch.log(y_true_masked + eps), reduction='none')
+
+    # 应用时间衰减
+    weighted_error = error * time_decay
+    
+    # 计算每个样本的平均误差
+    mean_error = torch.sum(weighted_error, dim=1) / torch.sum(mask, dim=1)
+    
+    # 计算最终损失
+    loss = torch.mean(mean_error[torch.isfinite(mean_error)])
     return loss

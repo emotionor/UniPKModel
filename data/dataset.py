@@ -36,7 +36,9 @@ def read_data(config, filepath):
 
     smiles_list = data[smiles_col].values
     targets = data[target_cols].values
-    return smiles_list, targets
+
+    id_list = data['ID'].values if 'ID' in data.columns else None
+    return smiles_list, targets, id_list
 
 def load_or_create_dataset(config, split='train'):
     save_name = os.path.splitext(config[f'{split}_filepath'])[0] + '.pkl'
@@ -45,12 +47,12 @@ def load_or_create_dataset(config, split='train'):
         with open(save_name, 'rb') as f:
             dataset = pickle.load(f)
         if split == 'test':
-            smiles_list, targets = read_data(config, filepath=config[f'{split}_filepath'])
+            smiles_list, targets, id_list = read_data(config, filepath=config[f'{split}_filepath'])
     else:
-        smiles_list, targets = read_data(config, filepath=config[f'{split}_filepath'])
+        smiles_list, targets, id_list = read_data(config, filepath=config[f'{split}_filepath'])
         dataset = SMILESDataset(smiles_list, targets)
         with open(save_name, 'wb') as f:
             pickle.dump(dataset, f)
     if split == 'test':
-        return dataset, smiles_list, targets
+        return dataset, smiles_list, targets, id_list
     return dataset

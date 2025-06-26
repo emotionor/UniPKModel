@@ -9,7 +9,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader as TorchDataLoader
 from torch.nn.utils import clip_grad_norm_
-from sklearn.model_selection import KFold
+from sklearn.model_selection import KFold, train_test_split
 
 from models.unimol import UniMolModel
 from data import load_or_create_dataset, SMILESDataset
@@ -44,9 +44,16 @@ def k_fold_cross_validation(dataset, config):
     config['return_rep'] = return_rep
     setup_directories(config)
     device = setup_device()
-    kf = KFold(n_splits=config['k'], shuffle=True, random_state=42)
+    if config['k'] == 1:
+        logger.info('Using single fold (no K-Fold cross-validation)')
+        train_indices, val_indices = train_test_split(range(len(dataset)), test_size=0.2, random_state=42, shuffle=True)
+        split_data = [(train_indices, val_indices)]
+    else:
+        logger.info(f'Using K-Fold cross-validation with {config["k"]} folds')
+        kf = KFold(n_splits=config['k'], shuffle=True, random_state=42)
+        split_data = kf.split(dataset)
     fold_results = []
-    for fold, (train_idx, val_idx) in enumerate(kf.split(dataset)):
+    for fold, (train_idx, val_idx) in enumerate(split_data):
         logger.info(f'Fold {fold + 1}/{config["k"]}')
         torch.manual_seed(42)
         train_sampler = torch.utils.data.SubsetRandomSampler(train_idx)
@@ -114,7 +121,7 @@ def test_model(model_path, filepath=None):
         vd_mid_dim = config.get('vd_mid_dim', 32),
     ).to(device)
 
-    dataset, smiles_list, targets = load_or_create_dataset(config, split='test')
+    dataset, smiles_list, targets, id_list = load_or_create_dataset(config, split='test')
     #samples = generate_conformers(smiles_list, targets)
     dataloader = TorchDataLoader(dataset, batch_size=config['batch_size'], shuffle=False, collate_fn=model.batch_collate_fn)
 
@@ -148,10 +155,11 @@ def test_model(model_path, filepath=None):
     with open(os.path.join(model_path, 'test_metrics.json'), 'w') as f:
         json.dump(metrics_dict, f, indent=4)
 
+    df_id = pd.DataFrame(id_list, columns=['ID']) if id_list is not None else pd.DataFrame()
     df_smiles = pd.DataFrame(smiles_list, columns=['smiles'])
     df_targets = pd.DataFrame(targets, columns=['route', 'dose']+[f'time_{i}' for i in range(len(y_pred[0]))]+[f'conc_{i}' for i in range(len(y_pred[0]))])
     df_pred = pd.DataFrame(y_pred.cpu().numpy(), columns=[f'pred_conc_{i}' for i in range(len(y_pred[0]))])
-    df = pd.concat([df_smiles, df_targets, df_pred], axis=1)
+    df = pd.concat([df_id, df_smiles, df_targets, df_pred], axis=1)
     save_name = os.path.join(model_path, os.path.splitext(os.path.basename(config['test_filepath']))[0] + '_pred.csv')
     df.to_csv(save_name, index=False)
     return df
