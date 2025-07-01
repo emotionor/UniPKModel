@@ -7,10 +7,9 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader as TorchDataLoader
 
-
-from models.unimol import UniMolModel
+from models import CovariateEncoder, UniMolModel, UniPKModel
+from data import SMILESDataset
 from data.conformer import ConformerGen
-from models.pkmodel import UniPKModel
 from utils import read_yaml, pad_1d_tokens, pad_2d, pad_coords
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -33,19 +32,18 @@ def generate_dataset(smiles_list, mol_list, dose_route, dose):
 
 def batch_collate_fn_infer(samples):
     batch = {}
-    for k in samples[0][0].keys():
-        if k == 'src_coord':
-            v = pad_coords([torch.tensor(s[0][k]).float() for s in samples], pad_idx=0.0)
-        elif k == 'src_edge_type':
-            v = pad_2d([torch.tensor(s[0][k]).long() for s in samples], pad_idx=0)
-        elif k == 'src_distance':
-            v = pad_2d([torch.tensor(s[0][k]).float() for s in samples], pad_idx=0.0)
-        elif k == 'src_tokens':
-            v = pad_1d_tokens([torch.tensor(s[0][k]).long() for s in samples], pad_idx=0)
-        batch[k] = v
-    dose_route = torch.tensor([s[1] for s in samples]).float()
-    dose = torch.tensor([s[2] for s in samples]).float()
-    return batch, dose_route, dose
+    for key in samples[0][0].keys():
+        if isinstance(samples[0][0][key], (list, tuple)):
+            batch[key] = torch.tensor([s[0][key] for s in samples], dtype=torch.float)
+        else:
+            batch[key] = torch.tensor([s[0][key] for s in samples])
+    label = {}
+    for key in samples[0][1].keys():
+        if isinstance(samples[0][1][key], (list, tuple)):
+            label[key] = torch.tensor([s[1][key] for s in samples], dtype=torch.float)
+        else:
+            label[key] = torch.tensor([s[1][key] for s in samples])
+    return batch, label
 
 def pk_infer(model_path,
             dataloader,
@@ -66,7 +64,8 @@ def pk_infer(model_path,
     concs_total = []
     Vd_total = []
     for fold in range(num_folds):
-        model = UniMolModel(output_dim=output_dim, return_rep=return_rep).to(device)
+        # model = UniMolModel(output_dim=output_dim, return_rep=return_rep).to(device)
+        model = CovariateEncoder(input_dim=3, output_dim=512).to(device)
         pk_model = UniPKModel(num_cmpts=num_cmpts, 
                               route=route, 
                               method=method, 
@@ -81,10 +80,12 @@ def pk_infer(model_path,
         pk_model.eval()
         concs_batch = []
         Vd_batch = []
-        for batch, dose_route, dose in dataloader:
+        for batch, label in dataloader:
             model_input = {k: v.to(device) for k, v in batch.items()}
-            dose_route = dose_route.to(device)
-            dose = dose.to(device)
+            # dose_route = dose_route.to(device)
+            # dose = dose.to(device)
+            dose_route = label['route'].to(device)
+            dose = label['dose'].to(device)
             with torch.no_grad():
                 outputs = model(**model_input)
                 solution = pk_model(outputs.double(), dose_route.double(), dose.double(), meas_times)
@@ -141,7 +142,7 @@ def get_pk_parameters(Vd, dose, times, concs):
     
 
 def main(
-    smiles_list,
+    dataset_dict,
     mol_list=None,
     dose=1,
     dose_route=1,
@@ -167,7 +168,7 @@ def main(
     return_rep = config.get('return_rep', True)
 
     # Generate dataset
-    samples = generate_dataset(smiles_list, mol_list=mol_list, dose_route=dose_route, dose=dose)
+    samples = SMILESDataset(dataset_dict)
     dataloader = TorchDataLoader(samples, batch_size=batch_size, shuffle=False, collate_fn=batch_collate_fn_infer)
 
     # PK inference
@@ -195,38 +196,48 @@ def main(
             pk_params_folds.append(pd.DataFrame(pk_params_fold))
 
         pk_params_df = pd.concat(pk_params_folds, axis=1)
+        os.makedirs(save_path, exist_ok=True)
         pk_params_df.to_csv(os.path.join(save_path, 'pk_params_folds.csv'), index=False)
     else:
         pk_params = get_pk_parameters(Vd, dose, meas_times, concs)
+        dose = [data_item['dose'] for data_item in dataset_dict]
+        route = [data_item['route'] for data_item in dataset_dict]
+        sex = [data_item['sex'] for data_item in dataset_dict]
+        weight = [data_item['weight'] for data_item in dataset_dict]
         if save_json:
             if not os.path.exists(save_path):
                 os.makedirs(save_path)
             with open(os.path.join(save_path, 'ct_curve.json'), 'w') as f:
-                json.dump({'times': times.tolist(), 'concs': concs.tolist()}, f)
+                json.dump({
+                    'dose': dose,
+                    'route': route,
+                    'sex': sex,
+                    'weight': weight,
+                    'times': times.tolist(),
+                    'concs': concs.tolist()
+                }, f)
             with open(os.path.join(save_path, 'pk_params.json'), 'w') as f:
                 json.dump(pk_params, f)
         return pk_params
 
 if __name__ == "__main__":
-    # smiles_list = ['C1(F)C=C2C(S(=O)(=O)C3C=C(N4CCNCC4)C(OC)=CC=3)=CN(CC)C2=CC=1',
-    #             'ClC1=CC(N2N=C(C#N)C(NC2=O)=O)=CC(Cl)=C1OC3=CC=C4C(C5(CC5)C(N4)=O)=C3',
-    #             'C1(=CNC2C=CC(C#N)=CC1=2)CCCCN1CCN(C2N=CC(C3C=CC(C(N)=O)=CC=3)=CN=2)CC1',
-    #             'COC1=C(OCCCN2CCOCC2)C=C3C(N=CN=C3NC4=CC(Cl)=C(F)C=C4)=C1']
-    from rdkit.Chem import PandasTools
-    # mol_list = PandasTools.LoadSDF('test.sdf')['ROMol']
-    df = pd.read_csv('/vepfs/fs_users/cuiyaning/data/spk/data/CT1127_clean_iv_test.csv')
-    smiles_list = df['SMILES'].tolist()
 
-    model_dir = 'output_po7/pk_NeuralODE_3_log_mae_time_exp_decay_128_128'
-    pk_params = main(smiles_list=smiles_list,
+    from rdkit.Chem import PandasTools
+    import json
+
+    model_dir = '/fs_mol/cuiyaning/ckpt/pk/output_nop4/pk_NeuralODE_3_mixed_pk_loss_alpha12_peak1p0_auc1p0_log0p0_tail0p0'
+    dataset_path = '/fs_mol/cuiyaning/user/data/pk_data/nibr/Single_Ascending_Dose_Dataset2.json'
+    with open(dataset_path, 'r') as f:
+        dataset_dict = json.load(f)
+    pk_params = main(dataset_dict,
         mol_list=None, 
         dose=1,
         dose_route=1, 
         batch_size=4, 
         model_path=model_dir,
-        save_json=False,
-        save_path=model_dir,
-        return_all=True,
+        save_json=True,
+        save_path='./output/infer_pk_nibr',
+        return_all=False,
         )
     
     # df = pd.DataFrame(pk_params)
