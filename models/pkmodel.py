@@ -95,18 +95,32 @@ class BaseCompartmentModel(nn.Module):
         self.route = route
 
     def forward(self, t, y, params, V0=None):
+        if len(params.shape) == 1:
+            params = params.unsqueeze(0)
+        net_output = self.net(torch.cat([params, y[0].unsqueeze(1)], dim=-1))
+        Cl = net_output[:, 0]
+
         if self.route == 'i.v.':
-            return self.forward_iv(t, y, params, V0=V0)
+            C = y[:self.num_compartments]
+            dC_dt = torch.zeros_like(C)
+            dC_dt[0] = - Cl / V0 * C[0]
         elif self.route == 'p.o.':
-            return self.forward_po(t, y, params, V0=V0)
+            ka = self.poka(torch.cat([params, y[0].unsqueeze(1)], dim=-1)).squeeze(1)
+            C = y[:self.num_compartments + 1]
+            dC_dt = torch.zeros_like(C)
+            dC_dt[0] = - Cl / V0 * C[0] + ka * C[-1]
+            dC_dt[-1] = - ka * C[-1]
+
+        if self.num_compartments > 1:
+            rate_constants = net_output[:, 1:].view(-1, 2, self.num_compartments - 1)
+            for i in range(1, self.num_compartments):
+                dC_dt[0] +=  - rate_constants[:, 0, i-1] * C[0] + rate_constants[:, 1, i-1] * C[i]
+                dC_dt[i] = rate_constants[:, 0, i-1] * C[0] - rate_constants[:, 1, i-1] * C[i]
+
         else:
             raise ValueError(f"Unsupported route: {self.route}")
 
-    def forward_iv(self, t, y, params, V0=None):
-        raise NotImplementedError
-
-    def forward_po(self, t, y, params, V0=None):
-        raise NotImplementedError
+        return dC_dt
 
 class VolumeD(nn.Module):
     def __init__(self, input_dim, middle_dim=32):
@@ -141,38 +155,22 @@ class NeuralODE(BaseCompartmentModel):
                 nn.Softplus(),
             )
 
-    def forward_iv(self, t, y, params, V0):
+    def forward(self, t, y, params, V0):
         if len(params.shape) == 1:
             params = params.unsqueeze(0)
-
         net_output = self.net(torch.cat([params, y[0].unsqueeze(1)], dim=-1))
         Cl = net_output[:, 0]
 
-        C = y[:self.num_compartments]
-        dC_dt = torch.zeros_like(C)
-        dC_dt[0] = - Cl / V0 * C[0]
-
-        if self.num_compartments > 1:
-            rate_constants = net_output[:, 1:].view(-1, 2, self.num_compartments - 1)
-            for i in range(1, self.num_compartments):
-                dC_dt[0] +=  - rate_constants[:, 0, i-1] * C[0] + rate_constants[:, 1, i-1] * C[i]
-                dC_dt[i] = rate_constants[:, 0, i-1] * C[0] - rate_constants[:, 1, i-1] * C[i]
-
-        return dC_dt
-    
-    def forward_po(self, t, y, params, V0):
-        if len(params.shape) == 1:
-            params = params.unsqueeze(0)
-
-        net_output = self.net(torch.cat([params, y[0].unsqueeze(1)], dim=-1))
-        Cl = net_output[:, 0]
-
-        ka = self.poka(torch.cat([params, y[0].unsqueeze(1)], dim=-1)).squeeze(1)
-
-        C = y[:self.num_compartments + 1]
-        dC_dt = torch.zeros_like(C)
-        dC_dt[0] = - Cl / V0 * C[0] + ka * C[-1]
-        dC_dt[-1] = - ka * C[-1]
+        if self.route == 'i.v.':
+            C = y[:self.num_compartments]
+            dC_dt = torch.zeros_like(C)
+            dC_dt[0] = - Cl / V0 * C[0]
+        elif self.route == 'p.o.':
+            ka = self.poka(torch.cat([params, y[0].unsqueeze(1)], dim=-1)).squeeze(1)
+            C = y[:self.num_compartments + 1]
+            dC_dt = torch.zeros_like(C)
+            dC_dt[0] = - Cl / V0 * C[0] + ka * C[-1]
+            dC_dt[-1] = - ka * C[-1]
 
         if self.num_compartments > 1:
             rate_constants = net_output[:, 1:].view(-1, 2, self.num_compartments - 1)
@@ -195,17 +193,21 @@ class NeuralODE2(BaseCompartmentModel):
             nn.Softplus(),
         )
 
-    def forward_iv(self, t, y, params, V0):
+    def forward(self, t, y, params, V0):
         if len(params.shape) == 1:
             params = params.unsqueeze(0)
-
         net_output = self.net(torch.cat([params, y[0].unsqueeze(1)], dim=-1))
         Cl = net_output[:, 0]
-        
-        C = y[:self.num_compartments]
-        dC_dt = torch.zeros_like(C)
-        dC_dt[0] = - Cl / V0
-
+        if self.route == 'i.v.':       
+            C = y[:self.num_compartments]
+            dC_dt = torch.zeros_like(C)
+            dC_dt[0] = - Cl / V0
+        elif self.route == 'p.o.':
+            ka = self.poka(torch.cat([params, y[0].unsqueeze(1)], dim=-1)).squeeze(1)
+            C = y[:self.num_compartments + 1]
+            dC_dt = torch.zeros_like(C)
+            dC_dt[0] = - Cl / V0 * C[0] + ka * C[-1]
+            dC_dt[-1] = - ka * C[-1]
         if self.num_compartments > 1:
             rate_constants = net_output[:, 1:].view(-1, 2, self.num_compartments - 1)
             for i in range(1, self.num_compartments):
