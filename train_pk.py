@@ -171,4 +171,4 @@ def train(config):
 if __name__ == '__main__':
     config = read_yaml('config/config.yaml')
     train(config)
-    test_model(config['save_path'],'/vepfs/fs_users/cuiyaning/uni-qsar/0821/optuna-dml/test_pk/data/CT1127_clean_iv_test.csv')
+    test_model(config['save_path'],'/fs_mol/cuiyaning/user/uni-qsar/0821/optuna-dml/test_pk/data/CT1127_clean_iv_test.csv')
