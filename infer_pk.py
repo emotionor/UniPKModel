@@ -214,7 +214,7 @@ if __name__ == "__main__":
     #             'COC1=C(OCCCN2CCOCC2)C=C3C(N=CN=C3NC4=CC(Cl)=C(F)C=C4)=C1']
     from rdkit.Chem import PandasTools
     # mol_list = PandasTools.LoadSDF('test.sdf')['ROMol']
-    df = pd.read_csv('/vepfs/fs_users/cuiyaning/data/spk/data/CT1127_clean_iv_test.csv')
+    df = pd.read_csv('/fs_mol/cuiyaning/user/data/spk/data/CT1127_clean_iv_test.csv')
     smiles_list = df['SMILES'].tolist()
 
     model_dir = 'output_po7/pk_NeuralODE_3_log_mae_time_exp_decay_128_128'
