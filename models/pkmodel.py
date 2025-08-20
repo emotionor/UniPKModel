@@ -53,8 +53,8 @@ class UniPKModel(nn.Module):
         else:
             V0 = params[:,1]
 
-        V0 = torch.clamp(V0, min=1e-3) # add this will add time cost
-        C1 = doses * 1000 / V0  # Dose / Vc as initial condition
+        # V0 = torch.clamp(V0, min=1e-3) # add this will add time cost
+        C1 = doses / V0  # Dose / Vc as initial condition
         
         batch_size = C1.shape[0]
 
@@ -133,63 +133,35 @@ class NeuralODE(BaseCompartmentModel):
         self.input_dim = input_dim
         output_dim = num_compartments * 2 - 1
         self.net = nn.Sequential(
-            nn.Linear(input_dim + 2, middle_dim),
+            nn.Linear(input_dim + 1, middle_dim),
             nn.ReLU(),
             nn.Linear(middle_dim, output_dim),
             nn.Softplus(),
         )
         if route == 'p.o.':
             self.poka = nn.Sequential(
-                nn.Linear(input_dim + 2, middle_dim),
+                nn.Linear(input_dim + 1, middle_dim),
                 nn.ReLU(),
                 nn.Linear(middle_dim, 1),
                 nn.Softplus(),
             )
 
-    def forward_iv(self, t, y, params, V0):
+    def forward(self, t, y, params, V0):
         if len(params.shape) == 1:
             params = params.unsqueeze(0)
+        net_output = self.net(torch.cat([params, y[0].unsqueeze(1)], dim=-1))
+        Cl = net_output[:, 0]
 
-        C0 = y[0].unsqueeze(1)  # Ensure C0 is a column vector
-        C0_clamped = torch.clamp(C0, min=1e-3)
-        C0_feature = torch.cat([C0_clamped, torch.log(C0_clamped)], dim=-1)  
-        net_output = self.net(torch.cat([params, C0_feature], dim=-1))
-        # net_output = self.net(torch.cat([params, C0], dim=-1))
-        Cl = torch.clamp(net_output[:, 0], max=1e3)
-        # Cl = net_output[:, 0]
-
-        C = y[:self.num_compartments]
-        dC_dt = torch.zeros_like(C)
-        dC_dt[0] = - Cl / V0 * C[0]
-
-        if self.num_compartments > 1:
-            rate_constants = net_output[:, 1:].view(-1, 2, self.num_compartments - 1)
-            for i in range(1, self.num_compartments):
-                dC_dt[0] +=  - rate_constants[:, 0, i-1] * C[0] + rate_constants[:, 1, i-1] * C[i]
-                dC_dt[i] = rate_constants[:, 0, i-1] * C[0] - rate_constants[:, 1, i-1] * C[i]
-
-        
-        return dC_dt
-    
-    def forward_po(self, t, y, params, V0):
-        if len(params.shape) == 1:
-            params = params.unsqueeze(0)
-
-        C0 = y[0].unsqueeze(1)  # Ensure C0 is a column vector
-        C0_clamped = torch.clamp(C0, min=1e-3)
-        C0_feature = torch.cat([C0_clamped, torch.log(C0_clamped)], dim=-1)  
-        net_output = self.net(torch.cat([params, C0_feature], dim=-1))
-        # net_output = self.net(torch.cat([params, C0], dim=-1))
-        Cl = torch.clamp(net_output[:, 0], max=1e3)
-        # Cl = net_output[:, 0]
-
-        ka = self.poka(torch.cat([params, C0_feature], dim=-1)).squeeze(1)
-        # ka = torch.exp(ka)
-
-        C = y[:self.num_compartments + 1]
-        dC_dt = torch.zeros_like(C)
-        dC_dt[0] = - Cl / V0 * C[0] + ka * C[-1]
-        dC_dt[-1] = - ka * C[-1]
+        if self.route == 'i.v.':
+            C = y[:self.num_compartments]
+            dC_dt = torch.zeros_like(C)
+            dC_dt[0] = - Cl / V0 * C[0]
+        elif self.route == 'p.o.':
+            ka = self.poka(torch.cat([params, y[0].unsqueeze(1)], dim=-1)).squeeze(1)
+            C = y[:self.num_compartments + 1]
+            dC_dt = torch.zeros_like(C)
+            dC_dt[0] = - Cl / V0 * C[0] + ka * C[-1]
+            dC_dt[-1] = - ka * C[-1]
 
         if self.num_compartments > 1:
             rate_constants = net_output[:, 1:].view(-1, 2, self.num_compartments - 1)
