@@ -126,6 +126,7 @@ def test_model(model_path, filepath=None):
     dataloader = TorchDataLoader(dataset, batch_size=config['batch_size'], shuffle=False, collate_fn=model.batch_collate_fn)
 
     y_pred = []
+    all_metrics = []
     for fold in range(1, config['k']+1):
         logger.info(f'Loading model for fold {fold}')
         model_state_dict = torch.load(os.path.join(model_path, f'best_model_fold_{fold}.pth'))
@@ -146,6 +147,7 @@ def test_model(model_path, filepath=None):
         metrics = cal_all_losses(y_pred_fold, torch.tensor(targets, device=device, dtype=y_pred_fold.dtype)[:,n+1:])
         logger.info(f'Fold {fold} Test Metrics: {json.dumps(metrics, indent=4)}')
         y_pred.append(y_pred_fold)
+        all_metrics.append(metrics)
     
     y_pred = torch.stack(y_pred, dim=0)
     y_pred = torch.mean(y_pred, dim=0)
@@ -154,6 +156,9 @@ def test_model(model_path, filepath=None):
     
     with open(os.path.join(model_path, 'test_metrics.json'), 'w') as f:
         json.dump(metrics_dict, f, indent=4)
+    
+    with open(os.path.join(model_path, 'test_all_metrics.json'), 'w') as f:
+        json.dump(all_metrics, f, indent=4)
 
     df_id = pd.DataFrame(id_list, columns=['ID']) if id_list is not None else pd.DataFrame()
     df_smiles = pd.DataFrame(smiles_list, columns=['smiles'])
