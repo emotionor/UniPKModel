@@ -1,10 +1,22 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from unicore.modules import LayerNorm
-from unicore.utils import get_activation_fn
+from torch import nn
 
+def get_activation_fn(activation):
+    """Returns the activation function corresponding to `activation`"""
 
+    if activation == "relu":
+        return F.relu
+    elif activation == "gelu":
+        return F.gelu
+    elif activation == "tanh":
+        return torch.tanh
+    elif activation == "linear":
+        return lambda x: x
+    else:
+        raise RuntimeError("--activation-fn {} not supported".format(activation))
+    
 class ClassificationHead(nn.Module):
     """Head for sentence-level classification tasks."""
 
@@ -90,7 +102,7 @@ class MaskLMHead(nn.Module):
         super().__init__()
         self.dense = nn.Linear(embed_dim, embed_dim)
         self.activation_fn = get_activation_fn(activation_fn)
-        self.layer_norm = LayerNorm(embed_dim)
+        self.layer_norm = nn.LayerNorm(embed_dim)
 
         if weight is None:
             weight = nn.Linear(embed_dim, output_dim, bias=False).weight

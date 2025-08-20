@@ -6,21 +6,20 @@ import os
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from unicore.data import Dictionary
-from unicore.models import BaseUnicoreModel
-from unicore.modules import LayerNorm, init_bert_params
-from unicore.utils import get_activation_fn
 
 from utils import (DICT_PATH, PRE_TRAIN_WEIGHT_PATH, logger, pad_1d_tokens,
                      pad_2d, pad_coords)
+
 from .nnmodelzoo import ClassificationHead, GaussianLayer, NonLinearHead
 from .transformers import TransformerEncoderWithPair
+
+from data import Dictionary
 
 BACKBONE = {
     'transformer': TransformerEncoderWithPair,
 }
 
-class UniMolModel(BaseUnicoreModel):
+class UniMolModel(nn.Module):
     def __init__(self, output_dim=2, pretrain='mol_pre_no_h_220816.pt', return_rep=False):
         super().__init__()
         self.args = base_architecture()
@@ -59,7 +58,6 @@ class UniMolModel(BaseUnicoreModel):
             activation_fn=self.args.pooler_activation_fn,
             pooler_dropout=self.args.pooler_dropout,
         )
-        self.apply(init_bert_params)
         self.load_pretrained_weights(path=self.pretrain_path)
 
     def load_pretrained_weights(self, path):
