@@ -204,112 +204,78 @@ class NeuralODE2(BaseCompartmentModel):
         return dC_dt
 
 class MultiCompartmentModel(BaseCompartmentModel):
-    def forward_iv(self, t, y, params, **kwargs):
+    def forward(self, t, y, params, **kwargs):
         if len(params.shape) == 1:
             params = params.unsqueeze(0)  # for single sample
-        
-        Cl, V1 = params[:,0], params[:,1]
-        rate_constants = params[:, 2:].view(-1, 2, self.num_compartments - 1)
-        
-        C = y[:self.num_compartments]
-        dC_dt = torch.zeros_like(C)
-        dC_dt[0] = - Cl / V1 * C[0]
+
+        Cl, V1 = params[:, 0], params[:, 1]
+
+        if self.route == 'i.v.':
+            rate_constants = params[:, 2:].view(-1, 2, self.num_compartments - 1)
+            C = y[:self.num_compartments]
+            dC_dt = torch.zeros_like(C)
+            dC_dt[0] = - Cl / V1 * C[0]
+        elif self.route == 'p.o.':
+            ka = params[:, 2]
+            rate_constants = params[:, 3:].view(-1, 2, self.num_compartments - 1)
+            C = y[:self.num_compartments + 1]
+            dC_dt = torch.zeros_like(C)
+            dC_dt[0] = - Cl / V1 * C[0] + ka * C[-1]
+            dC_dt[-1] = - ka * C[-1]
 
         if self.num_compartments > 1:
             for i in range(1, self.num_compartments):
-                dC_dt[0] +=  - rate_constants[:, 0, i-1] * C[0] + rate_constants[:, 1, i-1] * C[i]
+                dC_dt[0] += - rate_constants[:, 0, i-1] * C[0] + rate_constants[:, 1, i-1] * C[i]
                 dC_dt[i] = rate_constants[:, 0, i-1] * C[0] - rate_constants[:, 1, i-1] * C[i]
 
         return dC_dt
 
-    def forward_po(self, t, y, params, **kwargs):
-        if len(params.shape) == 1:
-            params = params.unsqueeze(0)  # for single sample
-
-        Cl, V1, ka = params[:,0], params[:,1], params[:,2]
-        rate_constants = params[:, 3:].view(-1, 2, self.num_compartments - 1)
-
-        C = y[:self.num_compartments + 1]
-
-        dC_dt = torch.zeros_like(C)
-        dC_dt[0] = - Cl / V1 * C[0] + ka * C[-1]
-        dC_dt[-1] = - ka * C[-1]
-
-        if self.num_compartments > 1:
-            for i in range(1, self.num_compartments):
-                dC_dt[0] +=  - rate_constants[:, 0, i-1] * C[0] + rate_constants[:, 1, i-1] * C[i]
-                dC_dt[i] = rate_constants[:, 0, i-1] * C[0] - rate_constants[:, 1, i-1] * C[i]
-
-        return dC_dt
-    
 class MichaelisMentenModel(BaseCompartmentModel): 
-    def forward_iv(self, t, y, params, **kwargs):
-        if len(params.shape) == 1:
-            params = params.unsqueeze(0)  # for single sample
-            
-        V_m, V, K_m = params[:,0], params[:,1], params[:,2]
-        rate_constants = params[:, 3:].view(-1, 2, self.num_compartments - 1)
-
-        C = y[:self.num_compartments]
-        dC_dt = torch.zeros_like(C)
-        dC_dt[0] = - (V_m / V) * C[0] / (K_m + C[0])
-
-        if self.num_compartments > 1:
-            for i in range(1, self.num_compartments):
-                dC_dt[0] +=  - rate_constants[:, 0, i-1] * C[0] + rate_constants[:, 1, i-1] * C[i]
-                dC_dt[i] = rate_constants[:, 0, i-1] * C[0] - rate_constants[:, 1, i-1] * C[i]
-
-        return dC_dt
-    
-    def forward_po(self, t, y, params, **kwargs):
+    def forward(self, t, y, params, **kwargs):
         if len(params.shape) == 1:
             params = params.unsqueeze(0)  # for single sample
 
-        V_m, V, K_m, ka = params[:,0], params[:,1], params[:,2], params[:,3]
-        rate_constants = params[:, 4:].view(-1, 2, self.num_compartments - 1)
+        V_m, V, K_m = params[:, 0], params[:, 1], params[:, 2]
         
-        C = y[:self.num_compartments + 1]
-        dC_dt = torch.zeros_like(C)
-        dC_dt[0] = - (V_m / V) * C[0] / (K_m + C[0]) + ka * C[-1]
-        dC_dt[-1] = - ka * C[-1]
+        if self.route == 'i.v.':
+            rate_constants = params[:, 3:].view(-1, 2, self.num_compartments - 1)
+            C = y[:self.num_compartments]
+            dC_dt = torch.zeros_like(C)
+            dC_dt[0] = - (V_m / V) * C[0] / (K_m + C[0])
+        elif self.route == 'p.o.':
+            ka = params[:, 3]
+            rate_constants = params[:, 4:].view(-1, 2, self.num_compartments - 1)
+            C = y[:self.num_compartments + 1]
+            dC_dt = torch.zeros_like(C)
+            dC_dt[0] = - (V_m / V) * C[0] / (K_m + C[0]) + ka * C[-1]
+            dC_dt[-1] = - ka * C[-1]
 
         if self.num_compartments > 1:
             for i in range(1, self.num_compartments):
-                dC_dt[0] +=  - rate_constants[:, 0, i-1] * C[0] + rate_constants[:, 1, i-1] * C[i]
+                dC_dt[0] += - rate_constants[:, 0, i-1] * C[0] + rate_constants[:, 1, i-1] * C[i]
                 dC_dt[i] = rate_constants[:, 0, i-1] * C[0] - rate_constants[:, 1, i-1] * C[i]
 
         return dC_dt
     
 class AutoInductionModel(BaseCompartmentModel):       
-    def forward_iv(self, t, y, params, **kwargs):
+    def forward(self, t, y, params, **kwargs):
         if len(params.shape) == 1:
             params = params.unsqueeze(0) # for single sample
 
         Cl, V1, kint = params[:,0], params[:,1], params[:,2]
-        rate_constants = params[:, 3:].view(-1, 2, self.num_compartments - 1)
         
-        C = y[:self.num_compartments]
-        dC_dt = torch.zeros_like(C)
-        dC_dt[0] = - (Cl + kint * C[0]) / V1 * C[0]
-
-        if self.num_compartments > 1:
-            for i in range(1, self.num_compartments):
-                dC_dt[0] +=  - rate_constants[:, 0, i-1] * C[0] + rate_constants[:, 1, i-1] * C[i]
-                dC_dt[i] = rate_constants[:, 0, i-1] * C[0] - rate_constants[:, 1, i-1] * C[i]
-
-        return dC_dt
-    
-    def forward_po(self, t, y, params, **kwargs):
-        if len(params.shape) == 1:
-            params = params.unsqueeze(0) # for single sample
-
-        Cl, V1, kint, ka = params[:,0], params[:,1], params[:,2], params[:,3]
-        rate_constants = params[:, 4:].view(-1, 2, self.num_compartments - 1)
-
-        C = y[:self.num_compartments + 1]
-        dC_dt = torch.zeros_like(C)
-        dC_dt[0] = - (Cl + kint * C[0]) / V1 * C[0] + ka * C[-1]
-        dC_dt[-1] = - ka * C[-1]
+        if self.route == 'i.v.':
+            rate_constants = params[:, 3:].view(-1, 2, self.num_compartments - 1)
+            C = y[:self.num_compartments]
+            dC_dt = torch.zeros_like(C)
+            dC_dt[0] = - (Cl + kint * C[0]) / V1 * C[0]
+        elif self.route == 'p.o.':
+            ka = params[:,3]
+            rate_constants = params[:, 4:].view(-1, 2, self.num_compartments - 1)
+            C = y[:self.num_compartments + 1]
+            dC_dt = torch.zeros_like(C)
+            dC_dt[0] = - (Cl + kint * C[0]) / V1 * C[0] + ka * C[-1]
+            dC_dt[-1] = - ka * C[-1]
 
         if self.num_compartments > 1:
             for i in range(1, self.num_compartments):
@@ -319,16 +285,24 @@ class AutoInductionModel(BaseCompartmentModel):
         return dC_dt
 
 class AutoInductionModel2(BaseCompartmentModel):       
-    def forward_iv(self, t, y, params, **kwargs):
+    def forward(self, t, y, params, **kwargs):
         if len(params.shape) == 1:
             params = params.unsqueeze(0) # for single sample
 
         Cl, V1, k1, k2 = params[:,0], params[:,1], params[:,2], params[:,3]
-        rate_constants = params[:, 4:].view(-1, 2, self.num_compartments - 1)
-        
-        C = y[:self.num_compartments]
-        dC_dt = torch.zeros_like(C)
-        dC_dt[0] = - (Cl + k1 * C[0] / (k2 + C[0])) / V1 * C[0]
+
+        if self.route == 'i.v.':
+            rate_constants = params[:, 4:].view(-1, 2, self.num_compartments - 1)
+            C = y[:self.num_compartments]
+            dC_dt = torch.zeros_like(C)
+            dC_dt[0] = - (Cl + k1 * C[0] / (k2 + C[0])) / V1 * C[0]
+        elif self.route == 'p.o.':
+            ka = params[:,4]
+            rate_constants = params[:, 5:].view(-1, 2, self.num_compartments - 1)
+            C = y[:self.num_compartments + 1]
+            dC_dt = torch.zeros_like(C)
+            dC_dt[0] = - (Cl + k1 * C[0] / (k2 + C[0])) / V1 * C[0] + ka * C[-1]
+            dC_dt[-1] = - ka * C[-1]
 
         if self.num_compartments > 1:
             for i in range(1, self.num_compartments):
@@ -338,35 +312,24 @@ class AutoInductionModel2(BaseCompartmentModel):
         return dC_dt
 
 class AutoInhibitionModel(BaseCompartmentModel):
-    def forward_iv(self, t, y, params, **kwargs):
+    def forward(self, t, y, params, **kwargs):
         if len(params.shape) == 1:
             params = params.unsqueeze(0)
 
         Cl, V1, kinh = params[:,0], params[:,1], params[:,2]
-        rate_constants = params[:, 3:].view(-1, 2, self.num_compartments - 1)
-
-        C = y[:self.num_compartments]
-        dC_dt = torch.zeros_like(C)
-        dC_dt[0] = - (Cl / (1 + kinh * C[0])) / V1 * C[0]
-
-        if self.num_compartments > 1:
-            for i in range(1, self.num_compartments):
-                dC_dt[0] +=  - rate_constants[:, 0, i-1] * C[0] + rate_constants[:, 1, i-1] * C[i]
-                dC_dt[i] = rate_constants[:, 0, i-1] * C[0] - rate_constants[:, 1, i-1] * C[i]
-
-        return dC_dt
-    
-    def forward_po(self, t, y, params, **kwargs):
-        if len(params.shape) == 1:
-            params = params.unsqueeze(0)
-
-        Cl, V1, kinh, ka = params[:,0], params[:,1], params[:,2], params[:,3]
-        rate_constants = params[:, 4:].view(-1, 2, self.num_compartments - 1)
-
-        C = y[:self.num_compartments + 1]
-        dC_dt = torch.zeros_like(C)
-        dC_dt[0] = - (Cl / (1 + kinh * C[0])) / V1 * C[0] + ka * C[-1]
-        dC_dt[-1] = - ka * C[-1]
+        
+        if self.route == 'i.v.':
+            rate_constants = params[:, 3:].view(-1, 2, self.num_compartments - 1)
+            C = y[:self.num_compartments]
+            dC_dt = torch.zeros_like(C)
+            dC_dt[0] = - (Cl / (1 + kinh * C[0])) / V1 * C[0]
+        elif self.route == 'p.o.':
+            ka = params[:,3]
+            rate_constants = params[:, 4:].view(-1, 2, self.num_compartments - 1)
+            C = y[:self.num_compartments + 1]
+            dC_dt = torch.zeros_like(C)
+            dC_dt[0] = - (Cl / (1 + kinh * C[0])) / V1 * C[0] + ka * C[-1]
+            dC_dt[-1] = - ka * C[-1]
 
         if self.num_compartments > 1:
             for i in range(1, self.num_compartments):
@@ -376,35 +339,24 @@ class AutoInhibitionModel(BaseCompartmentModel):
         return dC_dt
     
 class MixPKModel1(BaseCompartmentModel):
-    def forward_iv(self, t, y, params, **kwargs):
+    def forward(self, t, y, params, **kwargs):
         if len(params.shape) == 1:
             params = params.unsqueeze(0)
 
         Cl, V1, k1, k2, k3 = params[:,0], params[:,1], params[:,2], params[:,3], params[:,4]
-        rate_constants = params[:, 5:].view(-1, 2, self.num_compartments - 1)
-
-        C = y[:self.num_compartments]
-        dC_dt = torch.zeros_like(C)
-        dC_dt[0] = - (Cl + k1 * C[0] + k2 / (k3 + C[0])) / V1 * C[0]
-
-        if self.num_compartments > 1:
-            for i in range(1, self.num_compartments):
-                dC_dt[0] +=  - rate_constants[:, 0, i-1] * C[0] + rate_constants[:, 1, i-1] * C[i]
-                dC_dt[i] = rate_constants[:, 0, i-1] * C[0] - rate_constants[:, 1, i-1] * C[i]
-
-        return dC_dt
-    
-    def forward_po(self, t, y, params, **kwargs):
-        if len(params.shape) == 1:
-            params = params.unsqueeze(0)
-
-        Cl, V1, k1, k2, k3, ka = params[:,0], params[:,1], params[:,2], params[:,3], params[:,4], params[:,5]
-        rate_constants = params[:, 6:].view(-1, 2, self.num_compartments - 1)
-
-        C = y[:self.num_compartments + 1]
-        dC_dt = torch.zeros_like(C)
-        dC_dt[0] = - (Cl + k1 * C[0] + k2 / (k3 + C[0])) / V1 * C[0] + ka * C[-1]
-        dC_dt[-1] = - ka * C[-1]
+        
+        if self.route == 'i.v.':
+            rate_constants = params[:, 5:].view(-1, 2, self.num_compartments - 1)
+            C = y[:self.num_compartments]
+            dC_dt = torch.zeros_like(C)
+            dC_dt[0] = - (Cl + k1 * C[0] + k2 / (k3 + C[0])) / V1 * C[0]
+        elif self.route == 'p.o.':
+            ka = params[:,5]
+            rate_constants = params[:, 6:].view(-1, 2, self.num_compartments - 1)
+            C = y[:self.num_compartments + 1]
+            dC_dt = torch.zeros_like(C)
+            dC_dt[0] = - (Cl + k1 * C[0] + k2 / (k3 + C[0])) / V1 * C[0] + ka * C[-1]
+            dC_dt[-1] = - ka * C[-1]
 
         if self.num_compartments > 1:
             for i in range(1, self.num_compartments):
@@ -414,15 +366,24 @@ class MixPKModel1(BaseCompartmentModel):
         return dC_dt
     
 class MixPKModel2(BaseCompartmentModel):
-    def forward_iv(self, t, y, params, **kwargs):
+    def forward(self, t, y, params, **kwargs):
         if len(params.shape) == 1:
             params = params.unsqueeze(0)
 
         Cl, V1, k1, k2, k3, k4 = params[:,0], params[:,1], params[:,2], params[:,3], params[:,4], params[:,5]
 
-        C = y[:self.num_compartments]
-        dC_dt = torch.zeros_like(C)
-        dC_dt[0] = - (Cl + k1 * C[0] / (k2 + C[0]) + k3 / (k4 + C[0])) / V1 * C[0]
+        if self.route == 'i.v.':
+            rate_constants = params[:, 6:].view(-1, 2, self.num_compartments - 1)
+            C = y[:self.num_compartments]
+            dC_dt = torch.zeros_like(C)
+            dC_dt[0] = - (Cl + k1 * C[0] / (k2 + C[0]) + k3 / (k4 + C[0])) / V1 * C[0]
+        elif self.route == 'p.o.':
+            ka = params[:,6]
+            rate_constants = params[:, 7:].view(-1, 2, self.num_compartments - 1)
+            C = y[:self.num_compartments + 1]
+            dC_dt = torch.zeros_like(C)
+            dC_dt[0] = - (Cl + k1 * C[0] / (k2 + C[0]) + k3 / (k4 + C[0])) / V1 * C[0] + ka * C[-1]
+            dC_dt[-1] = - ka * C[-1]
 
         if self.num_compartments > 1:
             rate_constants = params[:, 6:].view(-1, 2, self.num_compartments - 1)
@@ -433,16 +394,24 @@ class MixPKModel2(BaseCompartmentModel):
         return dC_dt
     
 class MixPKModel3(BaseCompartmentModel):
-    def forward_iv(self, t, y, params, **kwargs):
+    def forward(self, t, y, params, **kwargs):
         if len(params.shape) == 1:
             params = params.unsqueeze(0)
 
         Cl, V1, k1, k2, k3, k4 = params[:,0], params[:,1], params[:,2], params[:,3], params[:,4], params[:,5]
-        rate_constants = params[:, 6:].view(-1, 2, self.num_compartments - 1)
-
-        C = y[:self.num_compartments]
-        dC_dt = torch.zeros_like(C)
-        dC_dt[0] = - (Cl + k1 * C[0] / (k2 + C[0]) - k3 / (k4 + C[0])) / V1 * C[0]
+        
+        if self.route == 'i.v.':
+            rate_constants = params[:, 6:].view(-1, 2, self.num_compartments - 1)
+            C = y[:self.num_compartments]
+            dC_dt = torch.zeros_like(C)
+            dC_dt[0] = - (Cl + k1 * C[0] / (k2 + C[0]) - k3 / (k4 + C[0])) / V1 * C[0]
+        elif self.route == 'p.o.':
+            ka = params[:,6]
+            rate_constants = params[:, 7:].view(-1, 2, self.num_compartments - 1)
+            C = y[:self.num_compartments + 1]
+            dC_dt = torch.zeros_like(C)
+            dC_dt[0] = - (Cl + k1 * C[0] / (k2 + C[0]) - k3 / (k4 + C[0])) / V1 * C[0] + ka * C[-1]
+            dC_dt[-1] = - ka * C[-1]
 
         if self.num_compartments > 1:
             for i in range(1, self.num_compartments):
