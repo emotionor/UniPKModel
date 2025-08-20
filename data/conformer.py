@@ -17,7 +17,7 @@ warnings.filterwarnings(action='ignore')
 from multiprocessing import Pool
 
 from tqdm import tqdm
-from unicore.data import Dictionary
+from .dictionary import Dictionary
 
 from utils import logger, DICT_PATH
 from weights import WEIGHT_DIR
