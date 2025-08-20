@@ -10,9 +10,9 @@ batch_size: 64
 learning_rate: 1e-4
 eps: 1e-6
 warmup_ratio: 0.03
-loss_fn: 'log_mae_time_decay'
+loss_fn: 'log_mae_time_exp_decay'
 pretrain: 'mol_pre_all_h_220816.pt'
 num_cmpts: 3
-route: 'i.v.'
-method: 'mixmodel2'
-train_filepath: '/vepfs/fs_users/cuiyaning/uni-qsar/0821/optuna-dml/test_pk/data/CT_iv_train_val_50.csv'
+route: 'p.o.'
+method: 'NeuralODE'
+train_filepath: '/fs_mol/cuiyaning/user/uni-qsar/0821/optuna-dml/test_pk/data/CT_iv_train_val_50.csv'
