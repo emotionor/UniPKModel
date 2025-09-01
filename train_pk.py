@@ -96,13 +96,20 @@ def k_fold_cross_validation(dataset, config, writer=None):
     
     logger.info(f'Average Best Validation Loss: {np.mean(fold_results)}')
 
-def test_model(model_path, filepath=None):
+def test_model(model_path, test_filepath=None, output_path=None):
     config = read_yaml(os.path.join(model_path, 'config.yaml'))
-    if filepath is not None:
-        config['test_filepath'] = filepath
-    elif 'test_filepath' not in config:
+    if test_filepath is not None:
+        config['test_filepath'] = test_filepath
+    elif 'test_filepath' in config:
+        pass
+    else:    
         raise ValueError('Test file path is not provided')
-    save_yaml(config, os.path.join(model_path, 'config.yaml'))
+
+    if output_path is not None:
+        pass
+    else:
+        output_path = model_path
+    os.makedirs(output_path, exist_ok=True)
 
     device = setup_device()
     output_dim, return_rep = get_model_params(config['method'], config['route'], config['num_cmpts'])
@@ -153,10 +160,10 @@ def test_model(model_path, filepath=None):
     
     y_pred = torch.stack(y_pred, dim=0)
     y_pred = torch.mean(y_pred, dim=0)
-    metrics_dict = cal_all_losses(y_pred, torch.tensor(concentrations, device=device, dtype=y_pred_fold.dtype), save_path=model_path)
+    metrics_dict = cal_all_losses(y_pred, torch.tensor(concentrations, device=device, dtype=y_pred_fold.dtype), save_path=output_path)
     logger.info(f'Test Metrics: {json.dumps(metrics_dict, indent=4)}')
     
-    with open(os.path.join(model_path, 'test_metrics.json'), 'w') as f:
+    with open(os.path.join(output_path, 'test_metrics.json'), 'w') as f:
         json.dump(metrics_dict, f, indent=4)
 
     df_smiles = pd.DataFrame(smiles_list, columns=['smiles'])
