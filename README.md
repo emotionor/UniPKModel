@@ -41,7 +41,7 @@ Steps to train, validate, and infer using the model:
    test_model(model_path, test_filepath=test_filepath, output_path='./examples/outputs')
    ```
 
-   You can also test the model using the demo website: [Uni-PK Demo](https://funmg.dp.tech/uni-pk)
+   You can also test the model using the demo website: [Uni-PK Demo](https://funmg.dp.tech/uni-pk/#/)
 
 
 
