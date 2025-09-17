@@ -117,12 +117,7 @@ def get_pk_parameters(Vd, dose, times, concs):
 
     concs[concs < 0.01] = 0
     Auclast = np.trapz(concs, times)
-    Aucinf = np.zeros_like(Auclast)
-    for enu, conc in enumerate(concs):
-        if conc[-1] >= 0.01:
-            Aucinf[enu] = Auclast[enu] + 1/2 * conc[-1]**2 * (times[-1] - times[-5])/(conc[-1] - conc[-5])
-        else:
-            Aucinf[enu] = Auclast[enu]
+    Aucinf = Auclast
     Cl = dose / Aucinf
     T1_2 = np.log(2) * Vd / Cl
     mrt = np.trapz(concs * times, times) / Auclast
@@ -208,25 +203,25 @@ def main(
         return pk_params
 
 if __name__ == "__main__":
-    # smiles_list = ['C1(F)C=C2C(S(=O)(=O)C3C=C(N4CCNCC4)C(OC)=CC=3)=CN(CC)C2=CC=1',
-    #             'ClC1=CC(N2N=C(C#N)C(NC2=O)=O)=CC(Cl)=C1OC3=CC=C4C(C5(CC5)C(N4)=O)=C3',
-    #             'C1(=CNC2C=CC(C#N)=CC1=2)CCCCN1CCN(C2N=CC(C3C=CC(C(N)=O)=CC=3)=CN=2)CC1',
-    #             'COC1=C(OCCCN2CCOCC2)C=C3C(N=CN=C3NC4=CC(Cl)=C(F)C=C4)=C1']
-    from rdkit.Chem import PandasTools
+    smiles_list = ['C1(F)C=C2C(S(=O)(=O)C3C=C(N4CCNCC4)C(OC)=CC=3)=CN(CC)C2=CC=1',
+                'ClC1=CC(N2N=C(C#N)C(NC2=O)=O)=CC(Cl)=C1OC3=CC=C4C(C5(CC5)C(N4)=O)=C3',
+                'C1(=CNC2C=CC(C#N)=CC1=2)CCCCN1CCN(C2N=CC(C3C=CC(C(N)=O)=CC=3)=CN=2)CC1',
+                'COC1=C(OCCCN2CCOCC2)C=C3C(N=CN=C3NC4=CC(Cl)=C(F)C=C4)=C1']
+    # from rdkit.Chem import PandasTools
     # mol_list = PandasTools.LoadSDF('test.sdf')['ROMol']
-    df = pd.read_csv('/vepfs/fs_users/cuiyaning/data/spk/data/CT1127_clean_iv_test.csv')
-    smiles_list = df['SMILES'].tolist()
+    # df = pd.read_csv('/vepfs/fs_users/cuiyaning/data/spk/data/CT1127_clean_iv_test.csv')
+    # smiles_list = df['SMILES'].tolist()
 
-    model_dir = '/vepfs/fs_ckps/cuiyaning/pk/output_po/pk_NeuralODE_3_log_mae_time_exp_decay'
+    model_dir = '/fs_mol/cuiyaning/user/uni-qsar/250212/UniPKModel/examples/weights/pk_NeuralODE_3_log_mae_time_exp_decay_128_128_24'
     pk_params = main(smiles_list=smiles_list,
         mol_list=None, 
         dose=1,
         dose_route=1, 
         batch_size=4, 
         model_path=model_dir,
-        save_json=False,
+        save_json=True,
         save_path=model_dir,
-        return_all=True,
+        return_all=False,
         )
     
     # df = pd.DataFrame(pk_params)
