@@ -58,7 +58,7 @@ class UniMolModel(nn.Module):
             activation_fn=self.args.pooler_activation_fn,
             pooler_dropout=self.args.pooler_dropout,
         )
-        self.load_pretrained_weights(path=self.pretrain_path)
+        # self.load_pretrained_weights(path=self.pretrain_path)
 
     def load_pretrained_weights(self, path):
         if path is not None:
