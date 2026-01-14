@@ -11,6 +11,7 @@ from torch.utils.data import DataLoader as TorchDataLoader
 from torch.nn.utils import clip_grad_norm_
 from sklearn.model_selection import KFold
 from torch.utils.tensorboard import SummaryWriter
+from sklearn.model_selection import train_test_split
 
 from models.unimol import UniMolModel
 from data import load_or_create_dataset, SMILESDataset
@@ -45,9 +46,14 @@ def k_fold_cross_validation(dataset, config, writer=None):
     config['return_rep'] = return_rep
     setup_directories(config)
     device = setup_device()
-    kf = KFold(n_splits=config['k'], shuffle=True, random_state=42)
+    if config['k'] > 1:
+        kf = KFold(n_splits=config['k'], shuffle=True, random_state=42)
+        emu_kf = kf.split(dataset)
+    elif config['k'] == 1:
+        train_idx, val_idx = train_test_split(range(len(dataset)), test_size=0.2, random_state=0)
+        emu_kf = [(train_idx, val_idx)]
     fold_results = []
-    for fold, (train_idx, val_idx) in enumerate(kf.split(dataset)):
+    for fold, (train_idx, val_idx) in enumerate(emu_kf):
         logger.info(f'Fold {fold + 1}/{config["k"]}')
         torch.manual_seed(42)
         train_sampler = torch.utils.data.SubsetRandomSampler(train_idx)
@@ -189,4 +195,4 @@ def train(config):
 if __name__ == '__main__':
     config = read_yaml('config/config.yaml')
     train(config)
-    test_model(config['save_path'],'/vepfs/fs_users/cuiyaning/uni-qsar/0821/optuna-dml/test_pk/data/CT1127_clean_iv_test.csv')
+    test_model(config['save_path'],'examples/data/CT1127_clean_iv_test.csv')

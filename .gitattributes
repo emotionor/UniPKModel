@@ -1,1 +1,2 @@
-examples/weights/pk_NeuralODE_3_log_mae_time_exp_decay_128_128_24/* filter=lfs diff=lfs merge=lfs -text
+examples/weights/pk_NeuralODE_3_log_mae_time_exp_decay_128_128_24/*.pth filter=lfs diff=lfs merge=lfs -text
+examples/weights/pk_NeuralODE_3_log_mae_time_exp_decay_128_128_24_po/*.pth filter=lfs diff=lfs merge=lfs -text
