@@ -86,6 +86,7 @@ def cal_all_losses(y_preds, y_true, **kwargs):
     """计算并返回多种损失指标"""
     eps = 1e-5
     device = y_preds.device
+    
     mask = torch.isfinite(y_true) & torch.isfinite(y_preds)
     y_preds_masked = torch.where(mask, y_preds, torch.tensor(eps, device=device))
     y_true_masked = torch.where(mask, y_true, torch.tensor(eps, device=device))
@@ -101,7 +102,7 @@ def cal_all_losses(y_preds, y_true, **kwargs):
     mean_log_mse = torch.sum(log_mse, dim=1) / torch.clamp(torch.sum(mask, dim=1), min=1)
     mean_mae = torch.sum(mae, dim=1) / torch.clamp(torch.sum(mask, dim=1), min=1)
     mean_mse = torch.sum(mse, dim=1) / torch.clamp(torch.sum(mask, dim=1), min=1)
-    
+    # average_mfce_score = average_mfce(y_preds, y_true)
     # 计算R2分数
     r2_scores = []
     for i in range(mask.shape[0]):
@@ -150,7 +151,7 @@ def cal_all_losses(y_preds, y_true, **kwargs):
         'r2_score': r2_score.item(),
         'r2_nonzero_radio': r2_nonzero_radio.item(),
         'top30_r2': top30_r2.mean().item() if len(r2_scores) > 0 else 0.0,
-        'top60_r2': top60_r2.mean().item() if len(r2_scores) > 0 else 0.0
+        'top60_r2': top60_r2.mean().item() if len(r2_scores) > 0 else 0.0,
     }
 
 def torch_r2(y_preds, y_true):
@@ -184,8 +185,8 @@ def average_r2_score(y_preds, y_true, **kwargs):
 def torch_mfce(y_preds, y_true):
     """计算MFCE (Median Fold Change Error)"""
     eps = 1e-5
-    mfce = torch.exp(torch.median(torch.abs(torch.log(y_preds + eps) - torch.log(y_true + eps))))
-    return torch.clamp(mfce, max=1000)
+    mfce = torch.exp(torch.median(torch.abs(torch.log10(y_preds + eps) - torch.log10(y_true + eps))))
+    return torch.clamp(mfce, max=10)
 
 def average_mfce(y_preds, y_true, **kwargs):
     """计算平均MFCE"""
