@@ -1,7 +1,7 @@
 # Towards Generalizable Data-Driven Pharmacokinetics with Interpretable Neural ODEs
 
 [![Paper](https://img.shields.io/badge/Paper-JCIM-blue)](https://pubs.acs.org/doi/abs/10.1021/acs.jcim.5c02924)
-[![App](https://img.shields.io/badge/Demo-Uni--PK-green)](https://www.bohrium.com/apps/uni-pk)
+[![App](https://img.shields.io/badge/APP-Uni--PK-green)](https://www.bohrium.com/apps/uni-pk)
 [![Demo](https://img.shields.io/badge/Demo-Uni--PK-green)](https://funmg.dp.tech/uni-pk/#/)
 
 ## Introduction
