@@ -135,18 +135,7 @@ def main(
 
 if __name__ == "__main__":
 
-
-    # for loss_alpha in [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]:
-    #     model_dir = f'/vepfs/fs_ckps/cuiyaning/pk/output12_linear_max/pk_NeuralODE_3_log_mae_time_linear_decay_64_32_{loss_alpha}'
-
-    # for loss_alpha in [0.5, 0.8, 1.0, 1.5, 2.0, 3.0, 5.0, 7.0, 9.0, 12.0, 15.0, 18.0, 21.0, 24.0]:
-    # for loss_alpha in [12.0]:
-    #     model_dir = f'/vepfs/fs_ckps/cuiyaning/pk/output10_exp_max/pk_NeuralODE_3_log_mae_time_exp_decay_64_32_{loss_alpha}'
-    #     pk_params = main(
-    #         model_path=model_dir,
-    #         save_path=model_dir,
-    #         )
-    model_dir = '/vepfs/fs_ckps/cuiyaning/pk/output_po7/pk_NeuralODE_3_log_mae_time_exp_decay_128_128'
+    model_dir = './examples/weights/pk_NeuralODE_3_log_mae_time_exp_decay_128_128_24'
     pk_params = main(
         model_path=model_dir,
         save_path=model_dir,
