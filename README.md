@@ -94,11 +94,14 @@ If you find this work useful in your research, please cite our paper:
 DOI: [10.1021/acs.jcim.5c02924](https://pubs.acs.org/doi/abs/10.1021/acs.jcim.5c02924)
 
 ```bibtex
-@article{cui2025toward,
+@article{cui2026toward,
   title={Toward Generalizable Data-Driven Pharmacokinetics with Interpretable Neural ODEs},
   author={Cui, Yaning and Ji, Xiaohong and Guo, Wentao and Chen, Shangqian and Shen, Tao and Chen, Liye and Ke, Guolin and Jin, Chuanfei and Gao, Zhifeng and Sun, Weijie},
   journal={Journal of Chemical Information and Modeling},
-  year={2025},
+  volume={66},
+  number={5},
+  pages={2640--2650},
+  year={2026},
   publisher={ACS Publications}
   doi={10.1021/acs.jcim.5c02924}
 }
